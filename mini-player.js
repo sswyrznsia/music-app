@@ -1,0 +1,56 @@
+const miniStatus = document.querySelector("#miniStatus");
+const miniTitle = document.querySelector("#miniTitle");
+const miniProgress = document.querySelector("#miniProgress");
+const miniRepeat = document.querySelector("#miniRepeat");
+const miniPrev = document.querySelector("#miniPrev");
+const miniPlay = document.querySelector("#miniPlay");
+const miniNext = document.querySelector("#miniNext");
+const miniShuffle = document.querySelector("#miniShuffle");
+const miniVolume = document.querySelector("#miniVolume");
+const miniDark = document.querySelector("#miniDark");
+
+miniRepeat.addEventListener("click", () => sendCommand("toggle-repeat-one"));
+miniPrev.addEventListener("click", () => sendCommand("previous-track"));
+miniPlay.addEventListener("click", () => sendCommand("toggle-play"));
+miniNext.addEventListener("click", () => sendCommand("next-track"));
+miniShuffle.addEventListener("click", () => sendCommand("toggle-shuffle"));
+miniVolume.addEventListener("input", () => {
+  sendCommand({
+    type: "set-volume",
+    volume: Number(miniVolume.value) / 100,
+  });
+});
+miniDark.addEventListener("click", () => sendCommand("toggle-dark-mode"));
+
+if (window.pulseShelfDesktop) {
+  window.pulseShelfDesktop.onPlaybackState(renderState);
+}
+
+function sendCommand(command) {
+  window.pulseShelfDesktop?.sendCommand(command);
+}
+
+function renderState(state) {
+  const duration = Number(state.duration) || 0;
+  const position = Number(state.position) || 0;
+  const progress = duration > 0 ? Math.min(position / duration, 1) * 100 : 0;
+
+  miniTitle.textContent = state.title || "노래를 선택해 주세요";
+  miniStatus.textContent = getStatusText(state);
+  miniProgress.style.width = `${progress}%`;
+  miniPlay.innerHTML = state.state === "playing" ? "&#10073;&#10073;" : "&#9654;";
+  miniRepeat.setAttribute("aria-pressed", String(Boolean(state.repeatOne)));
+  miniShuffle.setAttribute("aria-pressed", String(Boolean(state.shuffle)));
+  miniDark.setAttribute("aria-pressed", String(Boolean(state.darkMode)));
+  document.body.classList.toggle("dark", Boolean(state.darkMode));
+
+  if (document.activeElement !== miniVolume) {
+    miniVolume.value = String(Math.round((Number(state.volume) || 0) * 100));
+  }
+}
+
+function getStatusText(state) {
+  if (state.state === "playing") return "재생 중";
+  if (state.state === "paused") return "일시정지";
+  return "Pulse Shelf";
+}

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pulse Shelf Mini</title>
+    <link rel="stylesheet" href="./mini-player.css" />
+  </head>
+  <body>
+    <main class="mini-shell">
+      <div class="drag-region">
+        <p id="miniStatus">Pulse Shelf</p>
+        <strong id="miniTitle">노래를 선택해 주세요</strong>
+      </div>
+
+      <div class="progress-track" aria-hidden="true">
+        <span id="miniProgress"></span>
+      </div>
+
+      <div class="mini-settings">
+        <label class="volume-control" for="miniVolume">
+          <span>볼륨</span>
+          <input id="miniVolume" type="range" min="0" max="100" value="100" />
+        </label>
+        <button id="miniDark" class="mode-button" type="button" aria-pressed="false">다크</button>
+      </div>
+
+      <div class="mini-controls">
+        <button id="miniRepeat" class="mode-button" type="button" aria-pressed="false">반복</button>
+        <button id="miniPrev" class="icon-button" type="button" aria-label="이전 곡">&#9664;</button>
+        <button id="miniPlay" class="icon-button primary" type="button" aria-label="재생 또는 일시정지">
+          &#9654;
+        </button>
+        <button id="miniNext" class="icon-button" type="button" aria-label="다음 곡">&#9654;&#9654;</button>
+        <button id="miniShuffle" class="mode-button" type="button" aria-pressed="false">랜덤</button>
+      </div>
+    </main>
+
+    <script src="./mini-player.js"></script>
+  </body>
+</html>
