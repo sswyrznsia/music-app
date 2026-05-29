@@ -132,11 +132,11 @@ function createMiniWindow(url) {
 
   miniWindow = new BrowserWindow({
     width: 360,
-    height: 178,
+    height: 196,
     minWidth: 320,
-    minHeight: 160,
+    minHeight: 180,
     maxWidth: 420,
-    maxHeight: 220,
+    maxHeight: 250,
     alwaysOnTop: true,
     closable: false,
     frame: false,

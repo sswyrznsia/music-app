@@ -39,6 +39,8 @@ const ytDlpCandidates = [
   { command: "py", args: ["-m", "yt_dlp"] },
 ];
 
+let downloadProgress = createIdleDownloadProgress();
+
 if (require.main === module) {
   startServer().catch((error) => {
     console.error(error);
@@ -96,6 +98,10 @@ async function handleRequest(request, response) {
       return sendJson(response, toClientTrack(track), 201);
     }
 
+    if (url.pathname === "/api/download/progress" && request.method === "GET") {
+      return sendJson(response, getDownloadProgress());
+    }
+
     if (url.pathname === "/api/tracks" && request.method === "DELETE") {
       await deleteAllTracks();
       return sendJson(response, { ok: true });
@@ -117,6 +123,14 @@ async function handleRequest(request, response) {
 
     sendJson(response, { error: "지원하지 않는 요청입니다." }, 405);
   } catch (error) {
+    if (request.url?.startsWith("/api/download")) {
+      updateDownloadProgress({
+        active: false,
+        status: "error",
+        message: "다운로드 실패",
+      });
+    }
+
     const status = error.statusCode || 500;
     sendJson(response, { error: error.publicMessage || error.message || "서버 오류" }, status);
   }
@@ -133,31 +147,60 @@ async function getHealth() {
 }
 
 async function downloadTrack(sourceUrl) {
+  updateDownloadProgress({
+    active: true,
+    percent: 0,
+    status: "starting",
+    message: "다운로드 준비 중",
+  });
   const videoId = extractYouTubeId(sourceUrl);
   if (!videoId) {
+    updateDownloadProgress({
+      active: false,
+      status: "error",
+      message: "유효한 유튜브 링크가 아닙니다.",
+    });
     throw publicError("유효한 유튜브 링크를 넣어 주세요.", 400);
   }
 
   const ytDlp = findWorkingCommand(ytDlpCandidates);
 
   if (!ytDlp) {
+    updateDownloadProgress({
+      active: false,
+      status: "error",
+      message: "yt-dlp 설치가 필요합니다.",
+    });
     throw publicError("yt-dlp 설치가 필요합니다.", 503);
   }
 
   const id = crypto.randomUUID();
+  updateDownloadProgress({
+    percent: 4,
+    status: "metadata",
+    message: "영상 정보 확인 중",
+  });
   const metadata = await loadVideoMetadata(ytDlp, sourceUrl);
   const outputTemplate = path.join(LIBRARY_DIR, `${id}.%(ext)s`);
 
   await runCommand(ytDlp.command, [
     ...ytDlp.args,
+    "--newline",
     "--no-playlist",
     "--format",
     "bestaudio/best",
     "--output",
     outputTemplate,
     sourceUrl,
-  ]);
+  ], {
+    onOutput: updateProgressFromYtDlp,
+  });
 
+  updateDownloadProgress({
+    percent: 96,
+    status: "saving",
+    message: "파일 저장 중",
+  });
   const fileName = await findDownloadedFile(id);
   const tracks = await readTracks();
   const track = {
@@ -172,6 +215,12 @@ async function downloadTrack(sourceUrl) {
 
   tracks.unshift(track);
   await writeTracks(tracks);
+  updateDownloadProgress({
+    active: false,
+    percent: 100,
+    status: "complete",
+    message: "저장 완료",
+  });
   return track;
 }
 
@@ -190,6 +239,69 @@ async function loadVideoMetadata(ytDlp, sourceUrl) {
     };
   } catch {
     return {};
+  }
+}
+
+function createIdleDownloadProgress() {
+  return {
+    active: false,
+    percent: 0,
+    status: "idle",
+    message: "",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function getDownloadProgress() {
+  return downloadProgress;
+}
+
+function updateDownloadProgress(nextState) {
+  const percent =
+    typeof nextState.percent === "number"
+      ? Math.max(0, Math.min(100, nextState.percent))
+      : downloadProgress.percent;
+
+  downloadProgress = {
+    ...downloadProgress,
+    ...nextState,
+    percent,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function updateProgressFromYtDlp(output) {
+  const lines = String(output).split(/\r?\n/).filter(Boolean);
+
+  for (const line of lines) {
+    const percentMatch = line.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
+    if (percentMatch) {
+      updateDownloadProgress({
+        active: true,
+        percent: Math.min(95, Number(percentMatch[1])),
+        status: "downloading",
+        message: "오디오 다운로드 중",
+      });
+      continue;
+    }
+
+    if (line.includes("[download] Destination:")) {
+      updateDownloadProgress({
+        active: true,
+        status: "downloading",
+        message: "오디오 파일 받는 중",
+      });
+      continue;
+    }
+
+    if (line.includes("[ExtractAudio]") || line.includes("[Merger]")) {
+      updateDownloadProgress({
+        active: true,
+        percent: Math.max(downloadProgress.percent, 92),
+        status: "processing",
+        message: "오디오 정리 중",
+      });
+    }
   }
 }
 
@@ -387,7 +499,7 @@ function findWorkingCommand(candidates) {
   return null;
 }
 
-function runCommand(command, args) {
+function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: ROOT_DIR,
@@ -397,11 +509,15 @@ function runCommand(command, args) {
     let stderr = "";
 
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      stdout += text;
+      options.onOutput?.(text);
     });
 
     child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
+      const text = chunk.toString();
+      stderr += text;
+      options.onOutput?.(text);
     });
 
     child.on("error", reject);

@@ -1,6 +1,6 @@
 {
   "name": "pulse-shelf",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Local YouTube audio playlist app",
   "main": "electron-main.js",

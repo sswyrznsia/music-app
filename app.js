@@ -1,6 +1,10 @@
 const downloadForm = document.querySelector("#downloadForm");
 const youtubeUrl = document.querySelector("#youtubeUrl");
 const downloadButton = document.querySelector("#downloadButton");
+const downloadProgress = document.querySelector("#downloadProgress");
+const downloadProgressBar = document.querySelector("#downloadProgressBar");
+const downloadProgressText = document.querySelector("#downloadProgressText");
+const downloadProgressValue = document.querySelector("#downloadProgressValue");
 const trackList = document.querySelector("#trackList");
 const trackTemplate = document.querySelector("#trackTemplate");
 const clearQueue = document.querySelector("#clearQueue");
@@ -21,14 +25,34 @@ const playPause = document.querySelector("#playPause");
 const nextTrack = document.querySelector("#nextTrack");
 const repeatOne = document.querySelector("#repeatOne");
 const shuffleMode = document.querySelector("#shuffleMode");
+const searchInput = document.querySelector("#searchInput");
+const statsToggle = document.querySelector("#statsToggle");
+const statsPanel = document.querySelector("#statsPanel");
+const statsList = document.querySelector("#statsList");
+const statsTotal = document.querySelector("#statsTotal");
+const clearStats = document.querySelector("#clearStats");
+const playlistForm = document.querySelector("#playlistForm");
+const playlistName = document.querySelector("#playlistName");
+const playlistList = document.querySelector("#playlistList");
+const playlistTrackSelect = document.querySelector("#playlistTrackSelect");
+const playlistAddTrack = document.querySelector("#playlistAddTrack");
+const activePlaylistLabel = document.querySelector("#activePlaylistLabel");
 
 const PLAYER_OPTIONS_KEY = "pulseShelf.playerOptions";
+const PLAYLISTS_KEY = "pulseShelf.playlists";
+const LISTEN_STATS_KEY = "pulseShelf.listenStats";
 
 let tracks = [];
 let activeTrackId = null;
 let isBusy = false;
 let mediaProgressTimer = null;
+let downloadProgressTimer = null;
 let playerOptions = loadPlayerOptions();
+let playlists = loadPlaylists();
+let activePlaylistId = null;
+let searchQuery = "";
+let listenStats = loadListenStats();
+let lastStatsTick = 0;
 
 init();
 
@@ -38,30 +62,56 @@ downloadForm.addEventListener("submit", async (event) => {
   if (!url || isBusy) return;
 
   setBusy(true);
+  showDownloadProgress({
+    active: true,
+    percent: 0,
+    message: "다운로드 준비 중",
+  });
+  startDownloadProgressPolling();
   setStatus("저장 중");
 
   try {
     const track = await postJson("/api/download", { url });
+    showDownloadProgress({
+      active: false,
+      percent: 100,
+      message: "저장 완료",
+    });
     youtubeUrl.value = "";
     await loadTracks();
     playTrack(track.id);
   } catch (error) {
+    showDownloadProgress({
+      active: false,
+      percent: 0,
+      message: "다운로드 실패",
+    });
     setStatus(error.message || "저장 실패");
   } finally {
+    stopDownloadProgressPolling();
+    scheduleDownloadProgressHide();
     setBusy(false);
   }
 });
 
 clearQueue.addEventListener("click", async () => {
   if (!tracks.length || isBusy) return;
+  if (!confirm("전체 곡을 삭제할까요? 이 작업은 되돌릴 수 없습니다.")) return;
 
   setBusy(true);
   try {
     await fetch("/api/tracks", { method: "DELETE" });
     tracks = [];
+    playlists = playlists.map((playlist) => ({ ...playlist, trackIds: [] }));
+    listenStats = {};
     activeTrackId = null;
+    savePlaylists();
+    saveListenStats();
     stopPlayer();
     renderTracks();
+    renderPlaylists();
+    renderPlaylistTrackOptions();
+    renderStats();
     resetNowPlaying();
   } catch {
     setStatus("삭제 실패");
@@ -74,12 +124,35 @@ prevTrack.addEventListener("click", () => playPreviousTrack());
 nextTrack.addEventListener("click", () => playNextTrack());
 repeatOne.addEventListener("click", () => togglePlayerOption("repeatOne"));
 shuffleMode.addEventListener("click", () => togglePlayerOption("shuffle"));
+searchInput?.addEventListener("input", () => {
+  searchQuery = searchInput.value.trim().toLowerCase();
+  renderTracks();
+  renderPlaylistTrackOptions();
+});
+statsToggle?.addEventListener("click", () => {
+  statsPanel.hidden = !statsPanel.hidden;
+  statsToggle.setAttribute("aria-pressed", String(!statsPanel.hidden));
+  renderStats();
+});
+clearStats?.addEventListener("click", () => {
+  listenStats = {};
+  saveListenStats();
+  renderStats();
+});
+playlistForm?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  createPlaylist(playlistName.value);
+});
+playlistAddTrack?.addEventListener("click", () => {
+  addSelectedTrackToPlaylist();
+});
 
 playPause.addEventListener("click", togglePlayback);
 
 function togglePlayback() {
-  if (!activeTrackId && tracks.length) {
-    playTrack(tracks[0].id);
+  const playableTracks = getVisibleTracks();
+  if (!activeTrackId && playableTracks.length) {
+    playTrack(playableTracks[0].id);
     return;
   }
 
@@ -101,6 +174,7 @@ audioPlayer.addEventListener("play", () => {
 });
 
 audioPlayer.addEventListener("pause", () => {
+  flushListenStats();
   playPause.innerHTML = "&#9654;";
   setStatus("일시정지");
   vinyl.classList.remove("playing");
@@ -110,6 +184,7 @@ audioPlayer.addEventListener("pause", () => {
 });
 
 audioPlayer.addEventListener("ended", () => {
+  flushListenStats();
   vinyl.classList.remove("playing");
   handleTrackEnded();
 });
@@ -136,6 +211,8 @@ async function init() {
   initMediaSession();
   initDesktopBridge();
   await Promise.all([loadHealth(), loadTracks()]);
+  renderPlaylists();
+  renderStats();
 }
 
 async function loadHealth() {
@@ -162,7 +239,11 @@ async function loadHealth() {
 async function loadTracks() {
   try {
     tracks = await getJson("/api/tracks");
+    prunePlaylistTracks();
     renderTracks();
+    renderPlaylists();
+    renderPlaylistTrackOptions();
+    renderStats();
     if (!tracks.length) resetNowPlaying();
   } catch {
     setStatus("목록 로드 실패");
@@ -173,7 +254,9 @@ function playTrack(trackId) {
   const track = tracks.find((item) => item.id === trackId);
   if (!track) return;
 
+  flushListenStats();
   activeTrackId = track.id;
+  lastStatsTick = performance.now();
   currentTitle.textContent = track.title;
   currentKind.textContent = track.format || "Audio";
   sourceLabel.textContent = "Saved Audio";
@@ -186,18 +269,20 @@ function playTrack(trackId) {
 }
 
 function playRelative(offset) {
-  if (!tracks.length) return;
+  const playableTracks = getVisibleTracks();
+  if (!playableTracks.length) return;
 
-  const activeIndex = tracks.findIndex((track) => track.id === activeTrackId);
+  const activeIndex = playableTracks.findIndex((track) => track.id === activeTrackId);
   const baseIndex = activeIndex >= 0 ? activeIndex : 0;
-  const nextIndex = (baseIndex + offset + tracks.length) % tracks.length;
-  playTrack(tracks[nextIndex].id);
+  const nextIndex = (baseIndex + offset + playableTracks.length) % playableTracks.length;
+  playTrack(playableTracks[nextIndex].id);
 }
 
 function playNextTrack() {
-  if (!tracks.length) return;
+  const playableTracks = getVisibleTracks();
+  if (!playableTracks.length) return;
 
-  if (playerOptions.shuffle && tracks.length > 1) {
+  if (playerOptions.shuffle && playableTracks.length > 1) {
     playTrack(getRandomTrackId());
     return;
   }
@@ -206,9 +291,10 @@ function playNextTrack() {
 }
 
 function playPreviousTrack() {
-  if (!tracks.length) return;
+  const playableTracks = getVisibleTracks();
+  if (!playableTracks.length) return;
 
-  if (playerOptions.shuffle && tracks.length > 1) {
+  if (playerOptions.shuffle && playableTracks.length > 1) {
     playTrack(getRandomTrackId());
     return;
   }
@@ -227,8 +313,9 @@ function handleTrackEnded() {
 }
 
 function getRandomTrackId() {
-  const candidates = tracks.filter((track) => track.id !== activeTrackId);
-  const pool = candidates.length ? candidates : tracks;
+  const playableTracks = getVisibleTracks();
+  const candidates = playableTracks.filter((track) => track.id !== activeTrackId);
+  const pool = candidates.length ? candidates : playableTracks;
   const index = Math.floor(Math.random() * pool.length);
   return pool[index].id;
 }
@@ -273,6 +360,7 @@ function toggleDarkMode() {
 }
 
 function stopPlayer() {
+  flushListenStats();
   audioPlayer.pause();
   audioPlayer.removeAttribute("src");
   audioStage.classList.remove("active");
@@ -292,9 +380,13 @@ function resetNowPlaying() {
 
 function renderTracks() {
   trackList.replaceChildren();
-  queueCount.textContent = String(tracks.length);
+  const visibleTracks = getVisibleTracks();
+  queueCount.textContent = String(visibleTracks.length);
+  if (activePlaylistLabel) {
+    activePlaylistLabel.textContent = getActivePlaylist()?.name || "전체 곡";
+  }
 
-  if (!tracks.length) {
+  if (!visibleTracks.length) {
     const empty = document.createElement("p");
     empty.className = "track-empty";
     empty.textContent = "플레이리스트가 비어 있습니다.";
@@ -302,9 +394,10 @@ function renderTracks() {
     return;
   }
 
-  tracks.forEach((track) => {
+  visibleTracks.forEach((track) => {
     const item = trackTemplate.content.firstElementChild.cloneNode(true);
     const mainButton = item.querySelector(".track-main");
+    const playlistButton = item.querySelector(".playlist-track-action");
     const removeButton = item.querySelector(".remove-track");
     const thumb = item.querySelector(".thumb");
     const title = item.querySelector("strong");
@@ -323,10 +416,189 @@ function renderTracks() {
       thumb.textContent = "MP3";
     }
 
+    if (playlistButton) {
+      updateTrackPlaylistButton(playlistButton, track.id);
+    }
+
     mainButton.addEventListener("click", () => playTrack(track.id));
+    playlistButton?.addEventListener("click", () => toggleTrackInActivePlaylist(track.id));
     removeButton.addEventListener("click", () => removeTrack(track.id));
     trackList.append(item);
   });
+}
+
+function getVisibleTracks() {
+  const activePlaylist = getActivePlaylist();
+  const activeTrackIds = activePlaylist ? new Set(activePlaylist.trackIds) : null;
+
+  return tracks.filter((track) => {
+    const matchesPlaylist = !activeTrackIds || activeTrackIds.has(track.id);
+    const matchesSearch =
+      !searchQuery ||
+      track.title.toLowerCase().includes(searchQuery) ||
+      (track.format || "").toLowerCase().includes(searchQuery);
+
+    return matchesPlaylist && matchesSearch;
+  });
+}
+
+function getActivePlaylist() {
+  return playlists.find((playlist) => playlist.id === activePlaylistId) || null;
+}
+
+function createPlaylist(name) {
+  const cleanName = name.trim();
+  if (!cleanName) return;
+
+  playlists = [
+    ...playlists,
+    {
+      id: crypto.randomUUID(),
+      name: cleanName,
+      trackIds: [],
+      createdAt: new Date().toISOString(),
+    },
+  ];
+  playlistName.value = "";
+  savePlaylists();
+  renderPlaylists();
+}
+
+function renderPlaylists() {
+  if (!playlistList) return;
+
+  playlistList.replaceChildren();
+
+  if (!playlists.length) {
+    const empty = document.createElement("p");
+    empty.className = "playlist-empty";
+    empty.textContent = "플레이리스트가 없습니다.";
+    playlistList.append(empty);
+  } else {
+    playlists.forEach((playlist) => {
+      const item = document.createElement("div");
+      item.className = "playlist-item";
+
+      const button = document.createElement("button");
+      button.className = "playlist-chip";
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(playlist.id === activePlaylistId));
+      button.textContent = `${playlist.name} (${playlist.trackIds.length})`;
+      button.addEventListener("click", () => {
+        activePlaylistId = activePlaylistId === playlist.id ? null : playlist.id;
+        renderTracks();
+        renderPlaylists();
+        renderPlaylistTrackOptions();
+      });
+
+      const deleteButton = document.createElement("button");
+      deleteButton.className = "playlist-delete";
+      deleteButton.type = "button";
+      deleteButton.textContent = "삭제";
+      deleteButton.title = "플레이리스트 삭제";
+      deleteButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deletePlaylist(playlist.id);
+      });
+
+      item.append(button, deleteButton);
+      playlistList.append(item);
+    });
+  }
+
+  renderPlaylistTrackOptions();
+}
+
+function deletePlaylist(playlistId) {
+  playlists = playlists.filter((playlist) => playlist.id !== playlistId);
+  if (activePlaylistId === playlistId) {
+    activePlaylistId = null;
+  }
+
+  savePlaylists();
+  renderTracks();
+  renderPlaylists();
+  renderPlaylistTrackOptions();
+}
+
+function renderPlaylistTrackOptions() {
+  if (!playlistTrackSelect || !playlistAddTrack) return;
+
+  playlistTrackSelect.replaceChildren();
+  const activePlaylist = getActivePlaylist();
+  const tracksToAdd = activePlaylist
+    ? tracks.filter((track) => !activePlaylist.trackIds.includes(track.id))
+    : [];
+
+  if (!activePlaylist) {
+    playlistTrackSelect.append(new Option("플레이리스트를 선택하세요", ""));
+  } else if (!tracksToAdd.length) {
+    playlistTrackSelect.append(new Option("추가할 곡이 없습니다", ""));
+  } else {
+    tracksToAdd.forEach((track) => {
+      playlistTrackSelect.append(new Option(track.title, track.id));
+    });
+  }
+
+  playlistTrackSelect.disabled = !activePlaylist || !tracksToAdd.length;
+  playlistAddTrack.disabled = !activePlaylist || !tracksToAdd.length;
+}
+
+function addSelectedTrackToPlaylist() {
+  const trackId = playlistTrackSelect?.value;
+  const activePlaylist = getActivePlaylist();
+  if (!trackId || !activePlaylist) return;
+
+  playlists = playlists.map((playlist) => {
+    if (playlist.id !== activePlaylist.id || playlist.trackIds.includes(trackId)) return playlist;
+    return {
+      ...playlist,
+      trackIds: [...playlist.trackIds, trackId],
+    };
+  });
+  savePlaylists();
+  renderTracks();
+  renderPlaylists();
+  renderPlaylistTrackOptions();
+}
+
+function toggleTrackInActivePlaylist(trackId) {
+  const activePlaylist = getActivePlaylist();
+  if (!activePlaylist) return;
+
+  const hasTrack = activePlaylist.trackIds.includes(trackId);
+  playlists = playlists.map((playlist) => {
+    if (playlist.id !== activePlaylist.id) return playlist;
+    return {
+      ...playlist,
+      trackIds: hasTrack
+        ? playlist.trackIds.filter((id) => id !== trackId)
+        : [...playlist.trackIds, trackId],
+    };
+  });
+  savePlaylists();
+  renderTracks();
+  renderPlaylists();
+  renderPlaylistTrackOptions();
+}
+
+function updateTrackPlaylistButton(button, trackId) {
+  const activePlaylist = getActivePlaylist();
+  button.hidden = !activePlaylist;
+  if (!activePlaylist) return;
+
+  const hasTrack = activePlaylist.trackIds.includes(trackId);
+  button.textContent = hasTrack ? "빼기" : "추가";
+  button.title = hasTrack ? "이 플레이리스트에서 빼기" : "이 플레이리스트에 추가";
+}
+
+function prunePlaylistTracks() {
+  const trackIds = new Set(tracks.map((track) => track.id));
+  playlists = playlists.map((playlist) => ({
+    ...playlist,
+    trackIds: playlist.trackIds.filter((id) => trackIds.has(id)),
+  }));
+  savePlaylists();
 }
 
 async function removeTrack(trackId) {
@@ -341,6 +613,13 @@ async function removeTrack(trackId) {
     if (!response.ok) throw new Error();
 
     tracks = tracks.filter((track) => track.id !== trackId);
+    playlists = playlists.map((playlist) => ({
+      ...playlist,
+      trackIds: playlist.trackIds.filter((id) => id !== trackId),
+    }));
+    delete listenStats[trackId];
+    savePlaylists();
+    saveListenStats();
 
     if (activeTrackId === trackId) {
       activeTrackId = null;
@@ -349,6 +628,9 @@ async function removeTrack(trackId) {
     }
 
     renderTracks();
+    renderPlaylists();
+    renderPlaylistTrackOptions();
+    renderStats();
   } catch {
     setStatus("삭제 실패");
   } finally {
@@ -361,6 +643,56 @@ function setBusy(value) {
   downloadButton.disabled = value || toolState.classList.contains("warning");
   downloadButton.textContent = value ? "저장 중" : "저장";
   youtubeUrl.disabled = value;
+}
+
+function startDownloadProgressPolling() {
+  stopDownloadProgressPolling();
+  refreshDownloadProgress();
+  downloadProgressTimer = window.setInterval(refreshDownloadProgress, 400);
+}
+
+function stopDownloadProgressPolling() {
+  if (!downloadProgressTimer) return;
+
+  window.clearInterval(downloadProgressTimer);
+  downloadProgressTimer = null;
+}
+
+async function refreshDownloadProgress() {
+  try {
+    const progress = await getJson("/api/download/progress");
+    showDownloadProgress(progress);
+
+    if (!progress.active && ["complete", "error"].includes(progress.status)) {
+      stopDownloadProgressPolling();
+    }
+  } catch {
+  }
+}
+
+function showDownloadProgress(progress) {
+  const percent = Math.max(0, Math.min(100, Math.round(progress.percent || 0)));
+  downloadProgress.hidden = false;
+  downloadProgressBar.style.width = `${percent}%`;
+  downloadProgressValue.textContent = `${percent}%`;
+  downloadProgressText.textContent = progress.message || getDownloadProgressLabel(progress.status);
+}
+
+function scheduleDownloadProgressHide() {
+  window.setTimeout(() => {
+    if (isBusy) return;
+    downloadProgress.hidden = true;
+  }, 1600);
+}
+
+function getDownloadProgressLabel(status) {
+  if (status === "metadata") return "영상 정보 확인 중";
+  if (status === "downloading") return "오디오 다운로드 중";
+  if (status === "processing") return "오디오 정리 중";
+  if (status === "saving") return "파일 저장 중";
+  if (status === "complete") return "저장 완료";
+  if (status === "error") return "다운로드 실패";
+  return "다운로드 준비 중";
 }
 
 function setStatus(label, isLive = false) {
@@ -441,6 +773,11 @@ function runDesktopCommand(command) {
     return true;
   }
 
+  if (commandType === "seek-to") {
+    seekTo(command.position);
+    return true;
+  }
+
   if (commandType === "toggle-dark-mode") {
     toggleDarkMode();
     return true;
@@ -463,10 +800,13 @@ function resumePlayback() {
 function seekBy(offset) {
   if (!Number.isFinite(audioPlayer.duration)) return;
 
-  audioPlayer.currentTime = Math.max(
-    0,
-    Math.min(audioPlayer.currentTime + offset, audioPlayer.duration),
-  );
+  seekTo(audioPlayer.currentTime + offset);
+}
+
+function seekTo(position) {
+  if (!Number.isFinite(audioPlayer.duration)) return;
+
+  audioPlayer.currentTime = Math.max(0, Math.min(Number(position) || 0, audioPlayer.duration));
   updateMediaPosition();
 }
 
@@ -513,6 +853,7 @@ function stopMediaProgressUpdates() {
 }
 
 function updateMediaPosition() {
+  accumulateListenStats();
   const duration = audioPlayer.duration;
   const position = audioPlayer.currentTime;
 
@@ -578,6 +919,92 @@ function notifyDesktopPlayback(forcedState) {
   });
 }
 
+function accumulateListenStats() {
+  if (!activeTrackId || audioPlayer.paused) {
+    lastStatsTick = performance.now();
+    return;
+  }
+
+  const now = performance.now();
+  if (!lastStatsTick) {
+    lastStatsTick = now;
+    return;
+  }
+
+  const deltaSeconds = (now - lastStatsTick) / 1000;
+  lastStatsTick = now;
+  if (deltaSeconds <= 0 || deltaSeconds > 5) return;
+
+  listenStats[activeTrackId] = (listenStats[activeTrackId] || 0) + deltaSeconds;
+  saveListenStats();
+
+  if (statsPanel && !statsPanel.hidden) {
+    updateStatsNumbers();
+  }
+}
+
+function flushListenStats() {
+  accumulateListenStats();
+  lastStatsTick = 0;
+}
+
+function renderStats() {
+  if (!statsList) return;
+
+  const rows = tracks
+    .map((track) => ({
+      track,
+      seconds: listenStats[track.id] || 0,
+    }))
+    .sort((a, b) => b.seconds - a.seconds);
+
+  const totalSeconds = rows.reduce((sum, row) => sum + row.seconds, 0);
+  if (statsTotal) {
+    statsTotal.textContent = `${formatListenMinutes(totalSeconds)}분`;
+  }
+
+  statsList.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "stats-empty";
+    empty.textContent = "아직 들은 기록이 없습니다.";
+    statsList.append(empty);
+    return;
+  }
+
+  rows.forEach(({ track, seconds }) => {
+    const item = document.createElement("div");
+    item.className = "stats-row";
+    item.dataset.trackId = track.id;
+
+    const title = document.createElement("span");
+    title.textContent = track.title;
+
+    const minutes = document.createElement("strong");
+    minutes.dataset.statMinutes = track.id;
+    minutes.textContent = `${formatListenMinutes(seconds)}분`;
+
+    item.append(title, minutes);
+    statsList.append(item);
+  });
+}
+
+function updateStatsNumbers() {
+  const totalSeconds = tracks.reduce((sum, track) => sum + (listenStats[track.id] || 0), 0);
+  if (statsTotal) {
+    statsTotal.textContent = `${formatListenMinutes(totalSeconds)}분`;
+  }
+
+  statsList?.querySelectorAll("[data-stat-minutes]").forEach((item) => {
+    const seconds = listenStats[item.dataset.statMinutes] || 0;
+    item.textContent = `${formatListenMinutes(seconds)}분`;
+  });
+}
+
+function formatListenMinutes(seconds) {
+  return (Math.max(0, seconds) / 60).toFixed(1);
+}
+
 async function getJson(url) {
   const response = await fetch(url);
   const payload = await response.json().catch(() => null);
@@ -635,6 +1062,47 @@ function loadPlayerOptions() {
 
 function savePlayerOptions() {
   localStorage.setItem(PLAYER_OPTIONS_KEY, JSON.stringify(playerOptions));
+}
+
+function loadPlaylists() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PLAYLISTS_KEY) || "[]");
+    if (!Array.isArray(saved)) return [];
+
+    return saved
+      .filter((playlist) => playlist && typeof playlist.name === "string")
+      .map((playlist) => ({
+        id: playlist.id || crypto.randomUUID(),
+        name: playlist.name,
+        trackIds: Array.isArray(playlist.trackIds) ? playlist.trackIds : [],
+        createdAt: playlist.createdAt || new Date().toISOString(),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function savePlaylists() {
+  localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(playlists));
+}
+
+function loadListenStats() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LISTEN_STATS_KEY) || "{}");
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {};
+
+    return Object.fromEntries(
+      Object.entries(saved)
+        .map(([trackId, seconds]) => [trackId, Number(seconds) || 0])
+        .filter(([, seconds]) => seconds >= 0),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function saveListenStats() {
+  localStorage.setItem(LISTEN_STATS_KEY, JSON.stringify(listenStats));
 }
 
 function formatTime(seconds) {

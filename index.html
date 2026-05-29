@@ -8,6 +8,13 @@
   </head>
   <body>
     <main class="shell">
+      <header class="top-search">
+        <label class="search-box" for="searchInput">
+          <span>검색</span>
+          <input id="searchInput" type="search" autocomplete="off" placeholder="곡 제목 검색" />
+        </label>
+        <button id="statsToggle" class="top-action" type="button" aria-pressed="false">통계</button>
+      </header>
       <aside class="library-panel" aria-label="음악 보관함">
         <div class="brand-row">
           <div class="brand-mark" aria-hidden="true">
@@ -43,6 +50,15 @@
             <p class="helper-text" id="toolHelp">
               권한이 있는 콘텐츠나 직접 올린 콘텐츠만 저장해 주세요.
             </p>
+            <div class="download-progress" id="downloadProgress" hidden>
+              <div class="download-progress-row">
+                <span id="downloadProgressText">다운로드 준비 중</span>
+                <strong id="downloadProgressValue">0%</strong>
+              </div>
+              <div class="download-progress-track" aria-hidden="true">
+                <span id="downloadProgressBar"></span>
+              </div>
+            </div>
           </form>
         </section>
 
@@ -115,6 +131,31 @@
             <strong id="playerStatus">대기</strong>
           </div>
         </div>
+
+        <section class="playlist-panel" aria-labelledby="playlist-title">
+          <div class="section-heading">
+            <h2 id="playlist-title">플레이리스트</h2>
+            <span class="source-pill" id="activePlaylistLabel">전체 곡</span>
+          </div>
+          <form class="playlist-form" id="playlistForm">
+            <input id="playlistName" type="text" autocomplete="off" placeholder="새 플레이리스트 이름" />
+            <button type="submit">만들기</button>
+          </form>
+          <div class="playlist-list" id="playlistList"></div>
+          <div class="playlist-add">
+            <select id="playlistTrackSelect"></select>
+            <button id="playlistAddTrack" type="button">곡 추가</button>
+          </div>
+        </section>
+
+        <section class="stats-panel" id="statsPanel" hidden>
+          <div class="section-heading">
+            <h2>청취 통계</h2>
+            <button class="ghost-button" id="clearStats" type="button">초기화</button>
+          </div>
+          <p class="stats-total">총 재생 시간 <strong id="statsTotal">0.0분</strong></p>
+          <div class="stats-list" id="statsList"></div>
+        </section>
       </section>
     </main>
 
@@ -127,6 +168,7 @@
             <small></small>
           </span>
         </button>
+        <button class="playlist-track-action" type="button" hidden>추가</button>
         <button class="remove-track" type="button" aria-label="삭제">×</button>
       </article>
     </template>
