@@ -76,6 +76,8 @@
           <div>
             <p class="eyebrow" id="sourceLabel">Ready</p>
             <h2 id="currentTitle">노래를 선택해 주세요</h2>
+            <p class="artist-line" id="artistLabel">업로더 정보 없음</p>
+            <a class="youtube-link" id="youtubeLink" href="#" hidden>유튜브에서 열기</a>
           </div>
           <div class="status-dot" id="statusDot" aria-hidden="true"></div>
         </div>
@@ -115,6 +117,13 @@
           <button class="mode-toggle" id="shuffleMode" type="button" aria-pressed="false">
             랜덤
           </button>
+        </div>
+
+        <div class="loop-panel">
+          <button class="time-pill" id="loopStartTime" type="button">시작 처음</button>
+          <button class="time-pill" id="loopEndTime" type="button">끝 없음</button>
+          <button class="ghost-button" id="loopClear" type="button">시작 지우기</button>
+          <span id="loopStatus">구간 반복 꺼짐</span>
         </div>
 
         <div class="meta-strip">

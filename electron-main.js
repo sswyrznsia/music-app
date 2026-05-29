@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeImage } = require("electron");
+const { app, BrowserWindow, ipcMain, nativeImage, shell } = require("electron");
 const http = require("node:http");
 const path = require("node:path");
 
@@ -25,8 +25,11 @@ let playbackState = {
   duration: 0,
   darkMode: false,
   format: "",
+  artist: "",
   position: 0,
+  repeatEnd: 0,
   repeatOne: false,
+  repeatStart: 0,
   shuffle: false,
   state: "none",
   title: "Pulse Shelf",
@@ -131,12 +134,12 @@ function createMiniWindow(url) {
   }
 
   miniWindow = new BrowserWindow({
-    width: 360,
-    height: 196,
+    width: 380,
+    height: 304,
     minWidth: 320,
-    minHeight: 180,
-    maxWidth: 420,
-    maxHeight: 250,
+    minHeight: 286,
+    maxWidth: 460,
+    maxHeight: 360,
     alwaysOnTop: true,
     closable: false,
     frame: false,
@@ -209,8 +212,11 @@ ipcMain.on("playback-state", (_event, state) => {
     duration: Number(state.duration) || 0,
     darkMode: Boolean(state.darkMode),
     format: state.format || "",
+    artist: state.artist || "",
     position: Number(state.position) || 0,
+    repeatEnd: Number(state.repeatEnd) || 0,
     repeatOne: Boolean(state.repeatOne),
+    repeatStart: Number(state.repeatStart) || 0,
     shuffle: Boolean(state.shuffle),
     state: state.state || "none",
     title: state.title || "Pulse Shelf",
@@ -224,6 +230,13 @@ ipcMain.on("playback-state", (_event, state) => {
 ipcMain.on("desktop-command", (_event, command) => {
   writeLog(`Desktop command: ${command}`);
   sendCommandToMainWindow(command);
+});
+
+ipcMain.on("open-external", (_event, url) => {
+  if (typeof url !== "string" || !/^https:\/\/(www\.)?(youtube\.com|youtu\.be)\//.test(url)) return;
+  shell.openExternal(url).catch((error) => {
+    writeLog(`Open external failed: ${error.stack || error.message}`);
+  });
 });
 
 function sendCommandToMainWindow(command) {

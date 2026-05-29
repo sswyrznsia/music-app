@@ -459,6 +459,27 @@ input[type="search"]:focus {
   text-transform: uppercase;
 }
 
+.artist-line {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 750;
+}
+
+.youtube-link {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 8px;
+  color: var(--teal);
+  font-size: 0.82rem;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.youtube-link:hover {
+  text-decoration: underline;
+}
+
 #currentTitle {
   max-width: min(62vw, 680px);
   font-size: clamp(1.35rem, 2.8vw, 2.4rem);
@@ -598,6 +619,37 @@ audio {
   min-height: 50px;
   padding: 3px 0 8px;
   overflow: visible;
+}
+
+.loop-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+}
+
+.time-pill {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #f1f4f1;
+  color: var(--charcoal);
+  font-size: 0.8rem;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-pill[aria-pressed="true"] {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+#loopStatus {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 750;
 }
 
 .transport-button {

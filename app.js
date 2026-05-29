@@ -12,6 +12,8 @@ const audioPlayer = document.querySelector("#audioPlayer");
 const audioStage = document.querySelector("#audioStage");
 const emptyState = document.querySelector("#emptyState");
 const currentTitle = document.querySelector("#currentTitle");
+const artistLabel = document.querySelector("#artistLabel");
+const youtubeLink = document.querySelector("#youtubeLink");
 const sourceLabel = document.querySelector("#sourceLabel");
 const currentKind = document.querySelector("#currentKind");
 const playerStatus = document.querySelector("#playerStatus");
@@ -25,6 +27,10 @@ const playPause = document.querySelector("#playPause");
 const nextTrack = document.querySelector("#nextTrack");
 const repeatOne = document.querySelector("#repeatOne");
 const shuffleMode = document.querySelector("#shuffleMode");
+const loopStartTime = document.querySelector("#loopStartTime");
+const loopEndTime = document.querySelector("#loopEndTime");
+const loopClear = document.querySelector("#loopClear");
+const loopStatus = document.querySelector("#loopStatus");
 const searchInput = document.querySelector("#searchInput");
 const statsToggle = document.querySelector("#statsToggle");
 const statsPanel = document.querySelector("#statsPanel");
@@ -124,6 +130,27 @@ prevTrack.addEventListener("click", () => playPreviousTrack());
 nextTrack.addEventListener("click", () => playNextTrack());
 repeatOne.addEventListener("click", () => togglePlayerOption("repeatOne"));
 shuffleMode.addEventListener("click", () => togglePlayerOption("shuffle"));
+loopStartTime?.addEventListener("click", () => promptLoopStart());
+loopStartTime?.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+  clearLoopStart();
+});
+loopEndTime?.addEventListener("click", () => promptLoopEnd());
+loopEndTime?.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+  clearLoopEnd();
+});
+loopClear?.addEventListener("click", clearLoopStart);
+youtubeLink?.addEventListener("click", (event) => {
+  event.preventDefault();
+  const url = youtubeLink.href;
+  if (!url || url.endsWith("#")) return;
+  if (window.pulseShelfDesktop) {
+    window.pulseShelfDesktop.openExternal(url);
+  } else {
+    window.open(url, "_blank", "noopener");
+  }
+});
 searchInput?.addEventListener("input", () => {
   searchQuery = searchInput.value.trim().toLowerCase();
   renderTracks();
@@ -208,6 +235,7 @@ audioPlayer.addEventListener("volumechange", () => {
 async function init() {
   applyPlayerOptions();
   updateModeButtons();
+  updateLoopControls();
   initMediaSession();
   initDesktopBridge();
   await Promise.all([loadHealth(), loadTracks()]);
@@ -258,8 +286,10 @@ function playTrack(trackId) {
   activeTrackId = track.id;
   lastStatsTick = performance.now();
   currentTitle.textContent = track.title;
+  artistLabel.textContent = track.artist || "업로더 정보 없음";
   currentKind.textContent = track.format || "Audio";
   sourceLabel.textContent = "Saved Audio";
+  updateYoutubeLink(track);
   emptyState.style.display = "none";
   audioStage.classList.add("active");
   audioPlayer.src = track.audioUrl;
@@ -373,8 +403,10 @@ function stopPlayer() {
 
 function resetNowPlaying() {
   currentTitle.textContent = "노래를 선택해 주세요";
+  artistLabel.textContent = "아티스트 없음";
   sourceLabel.textContent = "Ready";
   currentKind.textContent = "-";
+  updateYoutubeLink(null);
   setStatus("대기");
 }
 
@@ -405,7 +437,7 @@ function renderTracks() {
 
     item.classList.toggle("active", track.id === activeTrackId);
     title.textContent = track.title;
-    subtitle.textContent = formatDate(track.createdAt);
+    subtitle.textContent = `${track.artist || "업로더 정보 없음"} · ${formatDate(track.createdAt)}`;
 
     if (track.thumbnail) {
       const image = document.createElement("img");
@@ -436,6 +468,7 @@ function getVisibleTracks() {
     const matchesSearch =
       !searchQuery ||
       track.title.toLowerCase().includes(searchQuery) ||
+      (track.artist || "").toLowerCase().includes(searchQuery) ||
       (track.format || "").toLowerCase().includes(searchQuery);
 
     return matchesPlaylist && matchesSearch;
@@ -778,6 +811,31 @@ function runDesktopCommand(command) {
     return true;
   }
 
+  if (commandType === "set-loop-start") {
+    setLoopStart(command.position);
+    return true;
+  }
+
+  if (commandType === "clear-loop-start") {
+    clearLoopStart();
+    return true;
+  }
+
+  if (commandType === "set-loop-end") {
+    setLoopEnd(command.position);
+    return true;
+  }
+
+  if (commandType === "clear-loop-end") {
+    clearLoopEnd();
+    return true;
+  }
+
+  if (commandType === "clear-loop") {
+    clearLoopRange();
+    return true;
+  }
+
   if (commandType === "toggle-dark-mode") {
     toggleDarkMode();
     return true;
@@ -810,6 +868,140 @@ function seekTo(position) {
   updateMediaPosition();
 }
 
+function setLoopStart(position) {
+  const duration = Number.isFinite(audioPlayer.duration) ? audioPlayer.duration : Infinity;
+  playerOptions.loopStart = Math.max(0, Math.min(Number(position) || 0, duration));
+  if (Number.isFinite(playerOptions.loopEnd) && playerOptions.loopEnd <= playerOptions.loopStart) {
+    playerOptions.loopEnd = null;
+  }
+  savePlayerOptions();
+  updateLoopControls();
+  notifyDesktopPlayback();
+}
+
+function setLoopEnd(position) {
+  const duration = Number.isFinite(audioPlayer.duration) ? audioPlayer.duration : Infinity;
+  playerOptions.loopEnd = Math.max(0, Math.min(Number(position) || 0, duration));
+  if (playerOptions.loopEnd <= getLoopStart()) {
+    playerOptions.loopStart = null;
+  }
+  savePlayerOptions();
+  updateLoopControls();
+  notifyDesktopPlayback();
+}
+
+function promptLoopStart() {
+  const input = prompt("반복 시작 시간을 입력하세요. 예: 1:23", formatTime(getLoopStart()));
+  if (input === null) return;
+  if (!input.trim()) {
+    clearLoopStart();
+    return;
+  }
+
+  const seconds = parseTimeInput(input);
+  if (seconds === null) {
+    alert("시간은 1:23 또는 83처럼 입력해 주세요.");
+    return;
+  }
+  setLoopStart(seconds);
+}
+
+function promptLoopEnd() {
+  const currentEnd = getLoopEnd() || audioPlayer.currentTime || 0;
+  const input = prompt("반복 끝 시간을 입력하세요. 예: 5:03", formatTime(currentEnd));
+  if (input === null) return;
+  if (!input.trim()) {
+    clearLoopEnd();
+    return;
+  }
+
+  const seconds = parseTimeInput(input);
+  if (seconds === null) {
+    alert("시간은 5:03 또는 303처럼 입력해 주세요.");
+    return;
+  }
+  setLoopEnd(seconds);
+}
+
+function clearLoopStart() {
+  playerOptions.loopStart = null;
+  savePlayerOptions();
+  updateLoopControls();
+  notifyDesktopPlayback();
+}
+
+function clearLoopEnd() {
+  playerOptions.loopEnd = null;
+  savePlayerOptions();
+  updateLoopControls();
+  notifyDesktopPlayback();
+}
+
+function clearLoopRange() {
+  playerOptions.loopStart = null;
+  playerOptions.loopEnd = null;
+  savePlayerOptions();
+  updateLoopControls();
+  notifyDesktopPlayback();
+}
+
+function getLoopStart() {
+  const value = Number(playerOptions.loopStart);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function getLoopEnd() {
+  const value = Number(playerOptions.loopEnd);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function hasLoopRange() {
+  const end = getLoopEnd();
+  return end > getLoopStart();
+}
+
+function enforceLoopRange(position, duration) {
+  if (!hasLoopRange() || !Number.isFinite(duration) || duration <= 0) return;
+
+  const start = getLoopStart();
+  const end = Math.min(getLoopEnd(), duration);
+  if (end <= start) return;
+
+  if (position >= end) {
+    audioPlayer.currentTime = start;
+  }
+}
+
+function updateLoopControls() {
+  const start = getLoopStart();
+  const end = getLoopEnd();
+  const active = hasLoopRange();
+
+  if (loopStartTime) {
+    loopStartTime.textContent = start > 0 ? `시작 ${formatTime(start)}` : "시작 처음";
+    loopStartTime.setAttribute("aria-pressed", String(start > 0));
+  }
+
+  if (loopEndTime) {
+    loopEndTime.textContent = end > 0 ? `끝 ${formatTime(end)}` : "끝 없음";
+    loopEndTime.setAttribute("aria-pressed", String(active));
+  }
+
+  if (loopStatus) {
+    loopStatus.textContent = active
+      ? `구간 반복 ${formatTime(start)} - ${formatTime(end)}`
+      : "구간 반복 꺼짐";
+  }
+}
+
+function updateYoutubeLink(track) {
+  if (!youtubeLink) return;
+
+  const url = track?.sourceUrl || (track?.videoId ? `https://www.youtube.com/watch?v=${track.videoId}` : "");
+  youtubeLink.hidden = !url;
+  youtubeLink.href = url || "#";
+}
+
 function updateMediaMetadata(track) {
   document.title = `${track.title} - Pulse Shelf`;
 
@@ -827,7 +1019,7 @@ function updateMediaMetadata(track) {
 
   navigator.mediaSession.metadata = new MediaMetadata({
     title: track.title,
-    artist: "Pulse Shelf",
+    artist: track.artist || "업로더 정보 없음",
     album: track.format || "Saved Audio",
     artwork,
   });
@@ -857,6 +1049,7 @@ function updateMediaPosition() {
   const duration = audioPlayer.duration;
   const position = audioPlayer.currentTime;
 
+  enforceLoopRange(position, duration);
   updateTaskbarTitle(position, duration);
   notifyDesktopPlayback();
 
@@ -911,8 +1104,11 @@ function notifyDesktopPlayback(forcedState) {
     position: Number.isFinite(position) ? position : 0,
     state: forcedState || (hasTrack ? (audioPlayer.paused ? "paused" : "playing") : "none"),
     title: track?.title || "Pulse Shelf",
+    artist: track?.artist || "업로더 정보 없음",
     format: track?.format || "",
     repeatOne: playerOptions.repeatOne,
+    repeatStart: getLoopStart(),
+    repeatEnd: getLoopEnd(),
     shuffle: playerOptions.shuffle,
     volume: playerOptions.volume,
     darkMode: playerOptions.darkMode,
@@ -1049,6 +1245,8 @@ function loadPlayerOptions() {
       repeatOne: Boolean(saved.repeatOne),
       shuffle: Boolean(saved.shuffle),
       volume: clampVolume(saved.volume ?? 1),
+      loopStart: Number.isFinite(Number(saved.loopStart)) ? Number(saved.loopStart) : null,
+      loopEnd: Number.isFinite(Number(saved.loopEnd)) ? Number(saved.loopEnd) : null,
     };
   } catch {
     return {
@@ -1056,6 +1254,8 @@ function loadPlayerOptions() {
       repeatOne: false,
       shuffle: false,
       volume: 1,
+      loopStart: null,
+      loopEnd: null,
     };
   }
 }
@@ -1110,6 +1310,29 @@ function formatTime(seconds) {
   const minutes = Math.floor(safeSeconds / 60);
   const remainder = String(safeSeconds % 60).padStart(2, "0");
   return `${minutes}:${remainder}`;
+}
+
+function parseTimeInput(value) {
+  const input = String(value).trim();
+  if (!input) return null;
+
+  if (/^\d+(?:\.\d+)?$/.test(input)) {
+    return Math.max(0, Number(input));
+  }
+
+  const parts = input.split(":").map((part) => part.trim());
+  if (parts.length < 2 || parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) {
+    return null;
+  }
+
+  const numbers = parts.map(Number);
+  if (numbers.some((number) => !Number.isFinite(number))) return null;
+
+  if (numbers.length === 2) {
+    return numbers[0] * 60 + numbers[1];
+  }
+
+  return numbers[0] * 3600 + numbers[1] * 60 + numbers[2];
 }
 
 function clampVolume(value) {

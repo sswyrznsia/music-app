@@ -11,6 +11,7 @@
       <div class="drag-region">
         <p id="miniStatus">Pulse Shelf</p>
         <strong id="miniTitle">노래를 선택해 주세요</strong>
+        <small id="miniArtist">업로더 정보 없음</small>
       </div>
 
       <div class="mini-time-row">
@@ -18,6 +19,12 @@
         <span id="miniDuration">0:00</span>
       </div>
       <input id="miniSeek" class="mini-seek" type="range" min="0" max="1000" value="0" />
+
+      <div class="mini-loop-row">
+        <button id="miniLoopStart" class="mode-button" type="button">시작</button>
+        <button id="miniLoopEnd" class="mode-button" type="button">끝</button>
+        <button id="miniLoopClear" class="mode-button" type="button">처음</button>
+      </div>
 
       <div class="mini-settings">
         <label class="volume-control" for="miniVolume">

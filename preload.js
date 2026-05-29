@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld("pulseShelfDesktop", {
   sendCommand(command) {
     ipcRenderer.send("desktop-command", command);
   },
+  openExternal(url) {
+    ipcRenderer.send("open-external", url);
+  },
   sendPlaybackState(state) {
     ipcRenderer.send("playback-state", {
       duration: Number(state.duration) || 0,
@@ -21,7 +24,10 @@ contextBridge.exposeInMainWorld("pulseShelfDesktop", {
       state: state.state || "none",
       title: state.title || "Pulse Shelf",
       format: state.format || "",
+      artist: state.artist || "",
       repeatOne: Boolean(state.repeatOne),
+      repeatStart: Number(state.repeatStart) || 0,
+      repeatEnd: Number(state.repeatEnd) || 0,
       shuffle: Boolean(state.shuffle),
       volume: Number(state.volume) || 0,
       darkMode: Boolean(state.darkMode),

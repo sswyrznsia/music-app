@@ -206,6 +206,7 @@ async function downloadTrack(sourceUrl) {
   const track = {
     id,
     title: metadata.title || `YouTube ${videoId}`,
+    artist: metadata.artist || "업로더 정보 없음",
     sourceUrl,
     videoId,
     fileName,
@@ -235,11 +236,16 @@ async function loadVideoMetadata(ytDlp, sourceUrl) {
     const info = JSON.parse(output.stdout);
     return {
       title: typeof info.title === "string" ? info.title : "",
+      artist: firstString(info.artist, info.uploader, info.channel, info.creator) || "업로더 정보 없음",
       thumbnail: typeof info.thumbnail === "string" ? info.thumbnail : "",
     };
   } catch {
     return {};
   }
+}
+
+function firstString(...values) {
+  return values.find((value) => typeof value === "string" && value.trim())?.trim() || "";
 }
 
 function createIdleDownloadProgress() {
@@ -319,10 +325,52 @@ async function readTracks() {
   try {
     const raw = await fs.readFile(TRACKS_FILE, "utf8");
     const tracks = JSON.parse(raw);
-    return Array.isArray(tracks) ? tracks : [];
+    if (!Array.isArray(tracks)) return [];
+    return hydrateTracksFromSeedMetadata(tracks);
   } catch (error) {
     if (error.code === "ENOENT") return [];
     throw error;
+  }
+}
+
+async function hydrateTracksFromSeedMetadata(tracks) {
+  const seedTracks = await readSeedTracks();
+  if (!seedTracks.length) return tracks;
+
+  const byId = new Map(seedTracks.map((track) => [track.id, track]));
+  const byVideoId = new Map(seedTracks.filter((track) => track.videoId).map((track) => [track.videoId, track]));
+  let changed = false;
+
+  const hydrated = tracks.map((track) => {
+    const seed = byId.get(track.id) || byVideoId.get(track.videoId);
+    if (!seed) return track;
+
+    const nextTrack = { ...track };
+    if ((!nextTrack.artist || nextTrack.artist === "YouTube") && seed.artist) {
+      nextTrack.artist = seed.artist;
+      changed = true;
+    }
+    if (!nextTrack.sourceUrl && seed.sourceUrl) {
+      nextTrack.sourceUrl = seed.sourceUrl;
+      changed = true;
+    }
+    return nextTrack;
+  });
+
+  if (changed) {
+    await fs.writeFile(TRACKS_FILE, JSON.stringify(hydrated, null, 2), "utf8");
+  }
+
+  return hydrated;
+}
+
+async function readSeedTracks() {
+  try {
+    const raw = await fs.readFile(path.join(SEED_DATA_DIR, "tracks.json"), "utf8");
+    const tracks = JSON.parse(raw);
+    return Array.isArray(tracks) ? tracks : [];
+  } catch {
+    return [];
   }
 }
 
@@ -359,12 +407,18 @@ function toClientTrack(track) {
   return {
     id: track.id,
     title: track.title,
+    artist: track.artist || track.uploader || "업로더 정보 없음",
+    sourceUrl: track.sourceUrl || youtubeUrlFromId(track.videoId),
     videoId: track.videoId,
     thumbnail: track.thumbnail,
     createdAt: track.createdAt,
     format: path.extname(track.fileName || "").replace(".", "").toUpperCase() || "Audio",
     audioUrl: `/media/${encodeURIComponent(track.fileName)}`,
   };
+}
+
+function youtubeUrlFromId(videoId) {
+  return videoId ? `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}` : "";
 }
 
 async function streamMedia(pathname, request, response) {
