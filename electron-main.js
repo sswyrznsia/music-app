@@ -24,6 +24,7 @@ let currentAppUrl = null;
 let playbackState = {
   duration: 0,
   darkMode: false,
+  favorite: false,
   format: "",
   artist: "",
   position: 0,
@@ -134,12 +135,12 @@ function createMiniWindow(url) {
   }
 
   miniWindow = new BrowserWindow({
-    width: 380,
-    height: 304,
+    width: 360,
+    height: 262,
     minWidth: 320,
-    minHeight: 286,
-    maxWidth: 460,
-    maxHeight: 360,
+    minHeight: 246,
+    maxWidth: 430,
+    maxHeight: 310,
     alwaysOnTop: true,
     closable: false,
     frame: false,
@@ -211,6 +212,7 @@ ipcMain.on("playback-state", (_event, state) => {
   playbackState = {
     duration: Number(state.duration) || 0,
     darkMode: Boolean(state.darkMode),
+    favorite: Boolean(state.favorite),
     format: state.format || "",
     artist: state.artist || "",
     position: Number(state.position) || 0,

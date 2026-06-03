@@ -69,6 +69,14 @@
           </div>
           <div class="track-list" id="trackList" role="list"></div>
         </section>
+
+        <section class="favorites-section" aria-labelledby="favorites-title">
+          <div class="section-heading">
+            <h2 id="favorites-title">즐겨찾기</h2>
+            <span class="source-pill" id="favoriteCount">0</span>
+          </div>
+          <div class="favorite-list" id="favoriteList"></div>
+        </section>
       </aside>
 
       <section class="player-panel" aria-label="플레이어">
@@ -177,6 +185,7 @@
             <small></small>
           </span>
         </button>
+        <button class="favorite-track" type="button" aria-label="즐겨찾기" aria-pressed="false">♡</button>
         <button class="playlist-track-action" type="button" hidden>추가</button>
         <button class="remove-track" type="button" aria-label="삭제">×</button>
       </article>

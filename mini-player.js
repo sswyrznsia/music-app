@@ -9,6 +9,7 @@ const miniPrev = document.querySelector("#miniPrev");
 const miniPlay = document.querySelector("#miniPlay");
 const miniNext = document.querySelector("#miniNext");
 const miniShuffle = document.querySelector("#miniShuffle");
+const miniFavorite = document.querySelector("#miniFavorite");
 const miniLoopStart = document.querySelector("#miniLoopStart");
 const miniLoopEnd = document.querySelector("#miniLoopEnd");
 const miniLoopClear = document.querySelector("#miniLoopClear");
@@ -26,6 +27,7 @@ miniPrev.addEventListener("click", () => sendCommand("previous-track"));
 miniPlay.addEventListener("click", () => sendCommand("toggle-play"));
 miniNext.addEventListener("click", () => sendCommand("next-track"));
 miniShuffle.addEventListener("click", () => sendCommand("toggle-shuffle"));
+miniFavorite.addEventListener("click", () => sendCommand("toggle-favorite"));
 miniLoopStart.addEventListener("click", () => {
   sendCommand({
     type: "set-loop-start",
@@ -96,6 +98,9 @@ function renderState(state) {
   miniPlay.innerHTML = state.state === "playing" ? "&#10073;&#10073;" : "&#9654;";
   miniRepeat.setAttribute("aria-pressed", String(Boolean(state.repeatOne)));
   miniShuffle.setAttribute("aria-pressed", String(Boolean(state.shuffle)));
+  miniFavorite.innerHTML = state.favorite ? "&#9829;" : "&#9825;";
+  miniFavorite.disabled = state.state === "none";
+  miniFavorite.setAttribute("aria-pressed", String(Boolean(state.favorite)));
   renderLoopState(state);
   miniDark.setAttribute("aria-pressed", String(Boolean(state.darkMode)));
   document.body.classList.toggle("dark", Boolean(state.darkMode));

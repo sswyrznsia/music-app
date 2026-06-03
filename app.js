@@ -43,10 +43,13 @@ const playlistList = document.querySelector("#playlistList");
 const playlistTrackSelect = document.querySelector("#playlistTrackSelect");
 const playlistAddTrack = document.querySelector("#playlistAddTrack");
 const activePlaylistLabel = document.querySelector("#activePlaylistLabel");
+const favoriteList = document.querySelector("#favoriteList");
+const favoriteCount = document.querySelector("#favoriteCount");
 
 const PLAYER_OPTIONS_KEY = "pulseShelf.playerOptions";
 const PLAYLISTS_KEY = "pulseShelf.playlists";
 const LISTEN_STATS_KEY = "pulseShelf.listenStats";
+const FAVORITES_KEY = "pulseShelf.favorites";
 
 let tracks = [];
 let activeTrackId = null;
@@ -58,6 +61,7 @@ let playlists = loadPlaylists();
 let activePlaylistId = null;
 let searchQuery = "";
 let listenStats = loadListenStats();
+let favoriteTrackIds = loadFavoriteTrackIds();
 let lastStatsTick = 0;
 
 init();
@@ -110,14 +114,17 @@ clearQueue.addEventListener("click", async () => {
     tracks = [];
     playlists = playlists.map((playlist) => ({ ...playlist, trackIds: [] }));
     listenStats = {};
+    favoriteTrackIds = [];
     activeTrackId = null;
     savePlaylists();
     saveListenStats();
+    saveFavoriteTrackIds();
     stopPlayer();
     renderTracks();
     renderPlaylists();
     renderPlaylistTrackOptions();
     renderStats();
+    renderFavorites();
     resetNowPlaying();
   } catch {
     setStatus("삭제 실패");
@@ -272,6 +279,7 @@ async function loadTracks() {
     renderPlaylists();
     renderPlaylistTrackOptions();
     renderStats();
+    renderFavorites();
     if (!tracks.length) resetNowPlaying();
   } catch {
     setStatus("목록 로드 실패");
@@ -411,6 +419,7 @@ function resetNowPlaying() {
 }
 
 function renderTracks() {
+  const previousScrollTop = trackList.scrollTop;
   trackList.replaceChildren();
   const visibleTracks = getVisibleTracks();
   queueCount.textContent = String(visibleTracks.length);
@@ -423,18 +432,21 @@ function renderTracks() {
     empty.className = "track-empty";
     empty.textContent = "플레이리스트가 비어 있습니다.";
     trackList.append(empty);
+    trackList.scrollTop = previousScrollTop;
     return;
   }
 
   visibleTracks.forEach((track) => {
     const item = trackTemplate.content.firstElementChild.cloneNode(true);
     const mainButton = item.querySelector(".track-main");
+    const favoriteButton = item.querySelector(".favorite-track");
     const playlistButton = item.querySelector(".playlist-track-action");
     const removeButton = item.querySelector(".remove-track");
     const thumb = item.querySelector(".thumb");
     const title = item.querySelector("strong");
     const subtitle = item.querySelector("small");
 
+    item.dataset.trackId = track.id;
     item.classList.toggle("active", track.id === activeTrackId);
     title.textContent = track.title;
     subtitle.textContent = `${track.artist || "업로더 정보 없음"} · ${formatDate(track.createdAt)}`;
@@ -451,11 +463,95 @@ function renderTracks() {
     if (playlistButton) {
       updateTrackPlaylistButton(playlistButton, track.id);
     }
+    updateFavoriteButton(favoriteButton, track.id);
 
     mainButton.addEventListener("click", () => playTrack(track.id));
+    favoriteButton?.addEventListener("click", () => toggleFavoriteTrack(track.id));
     playlistButton?.addEventListener("click", () => toggleTrackInActivePlaylist(track.id));
     removeButton.addEventListener("click", () => removeTrack(track.id));
     trackList.append(item);
+  });
+
+  trackList.scrollTop = previousScrollTop;
+}
+
+function toggleFavoriteTrack(trackId) {
+  if (!tracks.some((track) => track.id === trackId)) return;
+
+  if (favoriteTrackIds.includes(trackId)) {
+    favoriteTrackIds = favoriteTrackIds.filter((id) => id !== trackId);
+  } else {
+    favoriteTrackIds = [...favoriteTrackIds, trackId];
+  }
+
+  saveFavoriteTrackIds();
+  updateVisibleFavoriteButtons(trackId);
+  renderFavorites();
+  if (trackId === activeTrackId) {
+    notifyDesktopPlayback();
+  }
+}
+
+function updateFavoriteButton(button, trackId) {
+  if (!button) return;
+
+  const favorite = favoriteTrackIds.includes(trackId);
+  button.textContent = favorite ? "♥" : "♡";
+  button.setAttribute("aria-pressed", String(favorite));
+  button.title = favorite ? "즐겨찾기 해제" : "즐겨찾기 추가";
+}
+
+function updateVisibleFavoriteButtons(trackId) {
+  trackList
+    .querySelectorAll(".track-card")
+    .forEach((item) => {
+      if (item.dataset.trackId !== trackId) return;
+      updateFavoriteButton(item.querySelector(".favorite-track"), trackId);
+    });
+}
+
+function renderFavorites() {
+  if (!favoriteList) return;
+
+  const favorites = favoriteTrackIds
+    .map((trackId) => tracks.find((track) => track.id === trackId))
+    .filter(Boolean);
+
+  if (favoriteCount) {
+    favoriteCount.textContent = String(favorites.length);
+  }
+  favoriteList.replaceChildren();
+
+  if (!favorites.length) {
+    const empty = document.createElement("p");
+    empty.className = "favorite-empty";
+    empty.textContent = "하트를 누르면 여기에 모입니다.";
+    favoriteList.append(empty);
+    return;
+  }
+
+  favorites.forEach((track) => {
+    const item = document.createElement("button");
+    item.className = "favorite-item";
+    item.type = "button";
+    item.title = track.title;
+    item.addEventListener("click", () => playTrack(track.id));
+
+    const heart = document.createElement("span");
+    heart.textContent = "♥";
+
+    const copy = document.createElement("span");
+    copy.className = "favorite-copy";
+
+    const title = document.createElement("strong");
+    title.textContent = track.title;
+
+    const artist = document.createElement("small");
+    artist.textContent = track.artist || "업로더 정보 없음";
+
+    copy.append(title, artist);
+    item.append(heart, copy);
+    favoriteList.append(item);
   });
 }
 
@@ -631,7 +727,9 @@ function prunePlaylistTracks() {
     ...playlist,
     trackIds: playlist.trackIds.filter((id) => trackIds.has(id)),
   }));
+  favoriteTrackIds = favoriteTrackIds.filter((id) => trackIds.has(id));
   savePlaylists();
+  saveFavoriteTrackIds();
 }
 
 async function removeTrack(trackId) {
@@ -651,8 +749,10 @@ async function removeTrack(trackId) {
       trackIds: playlist.trackIds.filter((id) => id !== trackId),
     }));
     delete listenStats[trackId];
+    favoriteTrackIds = favoriteTrackIds.filter((id) => id !== trackId);
     savePlaylists();
     saveListenStats();
+    saveFavoriteTrackIds();
 
     if (activeTrackId === trackId) {
       activeTrackId = null;
@@ -664,6 +764,7 @@ async function removeTrack(trackId) {
     renderPlaylists();
     renderPlaylistTrackOptions();
     renderStats();
+    renderFavorites();
   } catch {
     setStatus("삭제 실패");
   } finally {
@@ -838,6 +939,13 @@ function runDesktopCommand(command) {
 
   if (commandType === "toggle-dark-mode") {
     toggleDarkMode();
+    return true;
+  }
+
+  if (commandType === "toggle-favorite") {
+    if (activeTrackId) {
+      toggleFavoriteTrack(activeTrackId);
+    }
     return true;
   }
 
@@ -1106,6 +1214,7 @@ function notifyDesktopPlayback(forcedState) {
     title: track?.title || "Pulse Shelf",
     artist: track?.artist || "업로더 정보 없음",
     format: track?.format || "",
+    favorite: Boolean(track && favoriteTrackIds.includes(track.id)),
     repeatOne: playerOptions.repeatOne,
     repeatStart: getLoopStart(),
     repeatEnd: getLoopEnd(),
@@ -1303,6 +1412,19 @@ function loadListenStats() {
 
 function saveListenStats() {
   localStorage.setItem(LISTEN_STATS_KEY, JSON.stringify(listenStats));
+}
+
+function loadFavoriteTrackIds() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FAVORITES_KEY) || "[]");
+    return Array.isArray(saved) ? saved.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveFavoriteTrackIds() {
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(favoriteTrackIds));
 }
 
 function formatTime(seconds) {

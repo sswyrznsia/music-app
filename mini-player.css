@@ -36,10 +36,10 @@ button {
 .mini-shell {
   display: grid;
   grid-template-rows: auto auto 18px auto auto auto;
-  gap: 8px;
+  gap: 6px;
   width: 100vw;
   height: 100vh;
-  padding: 12px;
+  padding: 10px;
   border: 1px solid rgba(217, 224, 220, 0.96);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.97);
@@ -65,7 +65,7 @@ body.dark .mini-shell {
   display: grid;
   gap: 2px;
   min-width: 0;
-  min-height: 54px;
+  min-height: 50px;
   -webkit-app-region: drag;
 }
 
@@ -119,7 +119,8 @@ body.dark .mini-shell {
 
 body.dark .mini-seek,
 body.dark .icon-button,
-body.dark .mode-button {
+body.dark .mode-button,
+body.dark .favorite-button {
   background: #2f3b3f;
 }
 
@@ -136,10 +137,10 @@ body.dark .mode-button {
 
 .mini-controls {
   display: grid;
-  grid-template-columns: 56px 38px 44px 44px 56px;
-  gap: 7px;
+  grid-template-columns: 50px 36px 42px 42px 52px minmax(0, 1fr) 32px;
+  gap: 6px;
   align-items: center;
-  min-height: 36px;
+  min-height: 34px;
 }
 
 .mini-loop-row {
@@ -160,7 +161,7 @@ body.dark .mode-button {
   grid-template-columns: minmax(0, 1fr) 56px;
   gap: 8px;
   align-items: center;
-  min-height: 36px;
+  min-height: 34px;
 }
 
 .volume-control {
@@ -181,10 +182,11 @@ body.dark .mode-button {
 }
 
 .icon-button,
-.mode-button {
+.mode-button,
+.favorite-button {
   display: grid;
   place-items: center;
-  height: 36px;
+  height: 34px;
   border-radius: 8px;
   background: #f1f4f1;
   color: var(--charcoal);
@@ -199,6 +201,22 @@ body.dark .mode-button {
 .mode-button {
   color: var(--muted);
   font-size: 0.76rem;
+}
+
+.favorite-button {
+  grid-column: 7;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.favorite-button[aria-pressed="true"] {
+  background: #ffe6e3;
+  color: #d9483b;
+}
+
+.favorite-button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .mode-button[aria-pressed="true"] {

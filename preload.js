@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld("pulseShelfDesktop", {
       title: state.title || "Pulse Shelf",
       format: state.format || "",
       artist: state.artist || "",
+      favorite: Boolean(state.favorite),
       repeatOne: Boolean(state.repeatOne),
       repeatStart: Number(state.repeatStart) || 0,
       repeatEnd: Number(state.repeatEnd) || 0,
