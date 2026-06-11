@@ -27,6 +27,7 @@ const playPause = document.querySelector("#playPause");
 const nextTrack = document.querySelector("#nextTrack");
 const repeatOne = document.querySelector("#repeatOne");
 const shuffleMode = document.querySelector("#shuffleMode");
+const autoMixMode = document.querySelector("#autoMixMode");
 const loopStartTime = document.querySelector("#loopStartTime");
 const loopEndTime = document.querySelector("#loopEndTime");
 const loopClear = document.querySelector("#loopClear");
@@ -50,12 +51,16 @@ const PLAYER_OPTIONS_KEY = "pulseShelf.playerOptions";
 const PLAYLISTS_KEY = "pulseShelf.playlists";
 const LISTEN_STATS_KEY = "pulseShelf.listenStats";
 const FAVORITES_KEY = "pulseShelf.favorites";
+const AUTO_MIX_SECONDS = 7;
+const AUTO_MIX_TICK_MS = 100;
 
 let tracks = [];
 let activeTrackId = null;
 let isBusy = false;
 let mediaProgressTimer = null;
 let downloadProgressTimer = null;
+let autoMixState = null;
+let internalVolumeEvents = 0;
 let playerOptions = loadPlayerOptions();
 let playlists = loadPlaylists();
 let activePlaylistId = null;
@@ -63,6 +68,9 @@ let searchQuery = "";
 let listenStats = loadListenStats();
 let favoriteTrackIds = loadFavoriteTrackIds();
 let lastStatsTick = 0;
+let lastPresenceUpdate = null;
+const autoMixAudio = new Audio();
+autoMixAudio.preload = "auto";
 
 init();
 
@@ -137,6 +145,7 @@ prevTrack.addEventListener("click", () => playPreviousTrack());
 nextTrack.addEventListener("click", () => playNextTrack());
 repeatOne.addEventListener("click", () => togglePlayerOption("repeatOne"));
 shuffleMode.addEventListener("click", () => togglePlayerOption("shuffle"));
+autoMixMode?.addEventListener("click", () => togglePlayerOption("autoMix"));
 loopStartTime?.addEventListener("click", () => promptLoopStart());
 loopStartTime?.addEventListener("contextmenu", (event) => {
   event.preventDefault();
@@ -195,11 +204,15 @@ function togglePlayback() {
   if (audioPlayer.paused) {
     audioPlayer.play().catch(() => setStatus("재생 대기"));
   } else {
+    cancelAutoMix();
     audioPlayer.pause();
   }
 }
 
 audioPlayer.addEventListener("play", () => {
+  if (!autoMixState) {
+    setAudioElementVolume(audioPlayer, playerOptions.volume, true);
+  }
   playPause.innerHTML = "&#10073;&#10073;";
   setStatus("재생 중", true);
   vinyl.classList.add("playing");
@@ -208,6 +221,9 @@ audioPlayer.addEventListener("play", () => {
 });
 
 audioPlayer.addEventListener("pause", () => {
+  if (autoMixState && !autoMixState.promoting) {
+    cancelAutoMix(false);
+  }
   flushListenStats();
   playPause.innerHTML = "&#9654;";
   setStatus("일시정지");
@@ -224,6 +240,11 @@ audioPlayer.addEventListener("ended", () => {
 });
 
 audioPlayer.addEventListener("volumechange", () => {
+  if (internalVolumeEvents > 0) {
+    internalVolumeEvents -= 1;
+    return;
+  }
+
   const volume = clampVolume(audioPlayer.volume);
   if (Math.abs(playerOptions.volume - volume) < 0.001) return;
 
@@ -287,6 +308,7 @@ async function loadTracks() {
 }
 
 function playTrack(trackId) {
+  cancelAutoMix();
   const track = tracks.find((item) => item.id === trackId);
   if (!track) return;
 
@@ -300,6 +322,7 @@ function playTrack(trackId) {
   updateYoutubeLink(track);
   emptyState.style.display = "none";
   audioStage.classList.add("active");
+  setAudioElementVolume(audioPlayer, playerOptions.volume, true);
   audioPlayer.src = track.audioUrl;
   updateMediaMetadata(track);
   audioPlayer.play().catch(() => setStatus("재생 대기"));
@@ -307,25 +330,13 @@ function playTrack(trackId) {
 }
 
 function playRelative(offset) {
-  const playableTracks = getVisibleTracks();
-  if (!playableTracks.length) return;
-
-  const activeIndex = playableTracks.findIndex((track) => track.id === activeTrackId);
-  const baseIndex = activeIndex >= 0 ? activeIndex : 0;
-  const nextIndex = (baseIndex + offset + playableTracks.length) % playableTracks.length;
-  playTrack(playableTracks[nextIndex].id);
+  const trackId = getRelativeTrackId(offset);
+  if (trackId) playTrack(trackId);
 }
 
 function playNextTrack() {
-  const playableTracks = getVisibleTracks();
-  if (!playableTracks.length) return;
-
-  if (playerOptions.shuffle && playableTracks.length > 1) {
-    playTrack(getRandomTrackId());
-    return;
-  }
-
-  playRelative(1);
+  const trackId = getNextTrackId();
+  if (trackId) playTrack(trackId);
 }
 
 function playPreviousTrack() {
@@ -341,6 +352,8 @@ function playPreviousTrack() {
 }
 
 function handleTrackEnded() {
+  if (autoMixState) return;
+
   if (playerOptions.repeatOne && activeTrackId) {
     audioPlayer.currentTime = 0;
     audioPlayer.play().catch(() => setStatus("재생 대기"));
@@ -358,11 +371,36 @@ function getRandomTrackId() {
   return pool[index].id;
 }
 
+function getNextTrackId() {
+  const playableTracks = getVisibleTracks();
+  if (!playableTracks.length) return null;
+
+  if (playerOptions.shuffle && playableTracks.length > 1) {
+    return getRandomTrackId();
+  }
+
+  return getRelativeTrackId(1);
+}
+
+function getRelativeTrackId(offset) {
+  const playableTracks = getVisibleTracks();
+  if (!playableTracks.length) return null;
+
+  const activeIndex = playableTracks.findIndex((track) => track.id === activeTrackId);
+  const baseIndex = activeIndex >= 0 ? activeIndex : 0;
+  const nextIndex = (baseIndex + offset + playableTracks.length) % playableTracks.length;
+  return playableTracks[nextIndex]?.id || null;
+}
+
 function togglePlayerOption(option) {
+  const nextValue = !playerOptions[option];
   playerOptions = {
     ...playerOptions,
-    [option]: !playerOptions[option],
+    [option]: nextValue,
   };
+  if (option === "autoMix" && !nextValue) {
+    cancelAutoMix();
+  }
   savePlayerOptions();
   updateModeButtons();
   notifyDesktopPlayback();
@@ -371,10 +409,11 @@ function togglePlayerOption(option) {
 function updateModeButtons() {
   repeatOne.setAttribute("aria-pressed", String(playerOptions.repeatOne));
   shuffleMode.setAttribute("aria-pressed", String(playerOptions.shuffle));
+  autoMixMode?.setAttribute("aria-pressed", String(playerOptions.autoMix));
 }
 
 function applyPlayerOptions() {
-  audioPlayer.volume = clampVolume(playerOptions.volume);
+  setAudioElementVolume(audioPlayer, playerOptions.volume, true);
 }
 
 function setPlayerVolume(volume) {
@@ -383,7 +422,11 @@ function setPlayerVolume(volume) {
     ...playerOptions,
     volume: nextVolume,
   };
-  audioPlayer.volume = nextVolume;
+  if (autoMixState) {
+    updateAutoMixFade();
+  } else {
+    audioPlayer.volume = nextVolume;
+  }
   savePlayerOptions();
   notifyDesktopPlayback();
 }
@@ -399,6 +442,7 @@ function toggleDarkMode() {
 
 function stopPlayer() {
   flushListenStats();
+  cancelAutoMix(false);
   audioPlayer.pause();
   audioPlayer.removeAttribute("src");
   audioStage.classList.remove("active");
@@ -1080,6 +1124,172 @@ function enforceLoopRange(position, duration) {
   }
 }
 
+function maybeStartAutoMix(position, duration) {
+  if (!playerOptions.autoMix || autoMixState) return;
+  if (playerOptions.repeatOne || hasLoopRange()) return;
+  if (audioPlayer.paused || !activeTrackId) return;
+  if (!Number.isFinite(duration) || duration <= AUTO_MIX_SECONDS + 2) return;
+
+  const nextTrackId = getNextTrackId();
+  if (!nextTrackId || nextTrackId === activeTrackId) return;
+
+  const remaining = duration - position;
+  if (remaining > AUTO_MIX_SECONDS || remaining <= 0) return;
+
+  startAutoMix(nextTrackId, Math.max(2, Math.min(AUTO_MIX_SECONDS, remaining)));
+}
+
+function startAutoMix(nextTrackId, mixSeconds) {
+  const nextTrack = tracks.find((track) => track.id === nextTrackId);
+  if (!nextTrack) return;
+
+  cancelAutoMix(false);
+
+  autoMixAudio.pause();
+  autoMixAudio.src = nextTrack.audioUrl;
+  autoMixAudio.currentTime = 0;
+  autoMixAudio.volume = 0;
+
+  autoMixState = {
+    duration: mixSeconds,
+    nextTrackId,
+    startedAt: performance.now(),
+    timer: null,
+    promoting: false,
+  };
+
+  autoMixAudio
+    .play()
+    .then(() => {
+      if (!autoMixState || autoMixState.nextTrackId !== nextTrackId) return;
+      setStatus(`자동 믹스: ${nextTrack.title}`);
+      updateAutoMixFade();
+      autoMixState.timer = window.setInterval(updateAutoMixFade, AUTO_MIX_TICK_MS);
+    })
+    .catch(() => {
+      cancelAutoMix();
+    });
+}
+
+function updateAutoMixFade() {
+  if (!autoMixState) return;
+
+  const elapsed = (performance.now() - autoMixState.startedAt) / 1000;
+  const progress = Math.max(0, Math.min(1, elapsed / autoMixState.duration));
+  const masterVolume = clampVolume(playerOptions.volume);
+  setAudioElementVolume(audioPlayer, masterVolume * (1 - progress), true);
+  autoMixAudio.volume = masterVolume * progress;
+
+  if (progress >= 1) {
+    finishAutoMix();
+  }
+}
+
+function finishAutoMix() {
+  if (!autoMixState || autoMixState.promoting) return;
+
+  const state = autoMixState;
+  const nextTrack = tracks.find((track) => track.id === state.nextTrackId);
+  if (!nextTrack) {
+    cancelAutoMix();
+    return;
+  }
+
+  state.promoting = true;
+  if (state.timer) {
+    window.clearInterval(state.timer);
+    state.timer = null;
+  }
+
+  const nextPosition = autoMixAudio.currentTime || 0;
+  flushListenStats();
+  activeTrackId = nextTrack.id;
+  lastStatsTick = performance.now();
+  currentTitle.textContent = nextTrack.title;
+  artistLabel.textContent = nextTrack.artist || "업로더 정보 없음";
+  currentKind.textContent = nextTrack.format || "Audio";
+  sourceLabel.textContent = "Saved Audio";
+  updateYoutubeLink(nextTrack);
+  emptyState.style.display = "none";
+  audioStage.classList.add("active");
+  setAudioElementVolume(audioPlayer, 0, true);
+  audioPlayer.src = nextTrack.audioUrl;
+
+  playPrimaryFrom(nextPosition)
+    .then(() => {
+      autoMixAudio.pause();
+      autoMixAudio.removeAttribute("src");
+      autoMixAudio.load();
+      setAudioElementVolume(audioPlayer, playerOptions.volume, true);
+      autoMixState = null;
+      updateMediaMetadata(nextTrack);
+      renderTracks();
+      notifyDesktopPlayback();
+    })
+    .catch(() => {
+      autoMixAudio.pause();
+      autoMixState = null;
+      setAudioElementVolume(audioPlayer, playerOptions.volume, true);
+      playTrack(nextTrack.id);
+    });
+}
+
+function playPrimaryFrom(position) {
+  return waitForMetadata(audioPlayer).then(() => {
+    const duration = Number.isFinite(audioPlayer.duration) ? audioPlayer.duration : 0;
+    if (duration > 0) {
+      audioPlayer.currentTime = Math.max(0, Math.min(position, duration - 0.25));
+    }
+    return audioPlayer.play();
+  });
+}
+
+function waitForMetadata(mediaElement) {
+  if (mediaElement.readyState >= 1) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      mediaElement.removeEventListener("loadedmetadata", handleLoaded);
+      mediaElement.removeEventListener("error", handleError);
+    };
+    const handleLoaded = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error("metadata load failed"));
+    };
+
+    mediaElement.addEventListener("loadedmetadata", handleLoaded);
+    mediaElement.addEventListener("error", handleError);
+  });
+}
+
+function cancelAutoMix(restoreVolume = true) {
+  if (!autoMixState && autoMixAudio.paused) return;
+
+  if (autoMixState?.timer) {
+    window.clearInterval(autoMixState.timer);
+  }
+
+  autoMixState = null;
+  autoMixAudio.pause();
+  autoMixAudio.removeAttribute("src");
+  autoMixAudio.load();
+
+  if (restoreVolume) {
+    setAudioElementVolume(audioPlayer, playerOptions.volume, true);
+  }
+}
+
+function setAudioElementVolume(element, volume, internal = false) {
+  if (internal && element === audioPlayer) {
+    internalVolumeEvents += 1;
+  }
+  element.volume = clampVolume(volume);
+}
+
 function updateLoopControls() {
   const start = getLoopStart();
   const end = getLoopEnd();
@@ -1158,6 +1368,7 @@ function updateMediaPosition() {
   const position = audioPlayer.currentTime;
 
   enforceLoopRange(position, duration);
+  maybeStartAutoMix(position, duration);
   updateTaskbarTitle(position, duration);
   notifyDesktopPlayback();
 
@@ -1206,14 +1417,14 @@ function notifyDesktopPlayback(forcedState) {
   const position = audioPlayer.currentTime;
   const hasTrack = Boolean(activeTrackId && audioPlayer.src);
   const track = tracks.find((item) => item.id === activeTrackId);
-
-  window.pulseShelfDesktop.sendPlaybackState({
+  const playbackState = {
     duration: Number.isFinite(duration) ? duration : 0,
     position: Number.isFinite(position) ? position : 0,
     state: forcedState || (hasTrack ? (audioPlayer.paused ? "paused" : "playing") : "none"),
     title: track?.title || "Pulse Shelf",
     artist: track?.artist || "업로더 정보 없음",
     format: track?.format || "",
+    trackId: track?.id || "",
     favorite: Boolean(track && favoriteTrackIds.includes(track.id)),
     repeatOne: playerOptions.repeatOne,
     repeatStart: getLoopStart(),
@@ -1221,7 +1432,47 @@ function notifyDesktopPlayback(forcedState) {
     shuffle: playerOptions.shuffle,
     volume: playerOptions.volume,
     darkMode: playerOptions.darkMode,
-  });
+  };
+
+  window.pulseShelfDesktop.sendPlaybackState(playbackState);
+  maybeNotifyDiscordPresence(playbackState);
+}
+
+function maybeNotifyDiscordPresence(playbackState) {
+  if (typeof window.pulseShelfDesktop?.sendPresencePlaybackUpdate !== "function") return;
+
+  const trackState = {
+    status: getPresenceStatus(playbackState.state),
+    title: playbackState.title,
+    artist: playbackState.artist,
+    album: playbackState.format,
+    duration: playbackState.duration,
+    position: playbackState.position,
+    trackId: playbackState.trackId,
+  };
+
+  if (!shouldSendPresenceUpdate(trackState)) return;
+
+  lastPresenceUpdate = trackState;
+  window.pulseShelfDesktop.sendPresencePlaybackUpdate(trackState);
+}
+
+function getPresenceStatus(state) {
+  if (state === "playing" || state === "paused") return state;
+  return "stopped";
+}
+
+function shouldSendPresenceUpdate(nextState) {
+  const previous = lastPresenceUpdate;
+  if (!previous) return true;
+  if (nextState.status === "stopped") return previous.status !== "stopped";
+  if (previous.status !== nextState.status) return true;
+  if (previous.trackId !== nextState.trackId) return true;
+  if (previous.title !== nextState.title) return true;
+  if (previous.artist !== nextState.artist) return true;
+  if (Math.abs((previous.duration || 0) - (nextState.duration || 0)) > 1) return true;
+
+  return nextState.status === "playing" && Math.abs((previous.position || 0) - (nextState.position || 0)) >= 15;
 }
 
 function accumulateListenStats() {
@@ -1350,6 +1601,7 @@ function loadPlayerOptions() {
   try {
     const saved = JSON.parse(localStorage.getItem(PLAYER_OPTIONS_KEY) || "{}");
     return {
+      autoMix: Boolean(saved.autoMix),
       darkMode: Boolean(saved.darkMode),
       repeatOne: Boolean(saved.repeatOne),
       shuffle: Boolean(saved.shuffle),
@@ -1359,6 +1611,7 @@ function loadPlayerOptions() {
     };
   } catch {
     return {
+      autoMix: false,
       darkMode: false,
       repeatOne: false,
       shuffle: false,

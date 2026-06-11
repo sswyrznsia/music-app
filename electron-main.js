@@ -10,6 +10,11 @@ if (app.isPackaged) {
 }
 
 const { startServer } = require("./server");
+const {
+  initDiscordPresence,
+  updatePlaybackPresence,
+  destroyDiscordPresence,
+} = require("./discordPresence");
 
 const ROOT_DIR = __dirname;
 const PORT_RANGE = Array.from({ length: 21 }, (_, index) => 4173 + index);
@@ -63,6 +68,11 @@ if (!gotLock) {
   app.whenReady()
     .then(async () => {
       writeLog("App ready.");
+      try {
+        initDiscordPresence({ logger: writeLog });
+      } catch (error) {
+        writeLog(`Discord Presence init failed: ${error.stack || error.message}`);
+      }
       const url = await findOrStartServer();
       writeLog(`Using app URL: ${url}`);
       createWindow(url);
@@ -79,6 +89,7 @@ if (!gotLock) {
   app.on("before-quit", () => {
     writeLog("Before quit.");
     appIsQuitting = true;
+    destroyDiscordPresence();
     cleanupMiniWindow();
     cleanupServer();
   });
@@ -227,6 +238,12 @@ ipcMain.on("playback-state", (_event, state) => {
   updateTaskbar();
   miniWindow?.webContents.send("playback-state-update", playbackState);
   keepMiniVisible();
+});
+
+ipcMain.on("presence:playback-update", (_event, trackState) => {
+  updatePlaybackPresence(trackState).catch((error) => {
+    writeLog(`Discord Presence playback update failed: ${error.stack || error.message}`);
+  });
 });
 
 ipcMain.on("desktop-command", (_event, command) => {

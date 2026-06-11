@@ -1,6 +1,6 @@
 {
   "name": "pulse-shelf",
-  "version": "1.1.0",
+  "version": "1.4.0",
   "private": true,
   "description": "Local YouTube audio playlist app",
   "main": "electron-main.js",
@@ -16,15 +16,18 @@
     "electron": "^42.2.0",
     "electron-builder": "^26.8.1"
   },
-    "build": {
-      "appId": "com.pulseshelf.music",
-      "productName": "Pulse Shelf",
-      "asar": false,
-      "directories": {
-        "output": "dist"
-      },
+  "build": {
+    "appId": "com.pulseshelf.music",
+    "productName": "Pulse Shelf",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
     "files": [
       "app.js",
+      "discordPresence.js",
+      ".env.example",
+      "DISCORD_RICH_PRESENCE.md",
       "electron-main.js",
       "index.html",
       "mini-player.css",
@@ -59,5 +62,9 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Pulse Shelf"
     }
+  },
+  "dependencies": {
+    "discord-rpc": "^4.0.1",
+    "dotenv": "^17.4.2"
   }
 }

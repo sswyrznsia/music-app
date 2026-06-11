@@ -34,4 +34,15 @@ contextBridge.exposeInMainWorld("pulseShelfDesktop", {
       darkMode: Boolean(state.darkMode),
     });
   },
+  sendPresencePlaybackUpdate(trackState = {}) {
+    ipcRenderer.send("presence:playback-update", {
+      status: trackState.status === "playing" || trackState.status === "paused" ? trackState.status : "stopped",
+      title: trackState.title || "",
+      artist: trackState.artist || "",
+      album: trackState.album || "",
+      duration: Number(trackState.duration) || 0,
+      position: Number(trackState.position) || 0,
+      trackId: trackState.trackId || "",
+    });
+  },
 });
