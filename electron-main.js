@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, nativeImage, shell } = require("electron");
+const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 
@@ -20,6 +21,7 @@ const ROOT_DIR = __dirname;
 const PORT_RANGE = Array.from({ length: 21 }, (_, index) => 4173 + index);
 const LOG_DIR = path.join(process.env.PULSE_SHELF_STORAGE_DIR || ROOT_DIR, "logs");
 const ELECTRON_LOG = path.join(LOG_DIR, "electron.log");
+const APP_ICON_PATH = path.join(ROOT_DIR, "assets", "icons", "pulse-shelf.png");
 
 let mainWindow = null;
 let miniWindow = null;
@@ -103,6 +105,7 @@ function createWindow(url) {
     height: 760,
     minWidth: 860,
     minHeight: 620,
+    icon: getAppIconPath() || undefined,
     show: false,
     title: "Pulse Shelf",
     webPreferences: {
@@ -111,6 +114,7 @@ function createWindow(url) {
       preload: path.join(ROOT_DIR, "preload.js"),
     },
   });
+  applyWindowIcon(mainWindow);
 
   mainWindow.loadURL(url).catch((error) => {
     writeLog(`Main window load failed: ${error.stack || error.message}`);
@@ -160,12 +164,14 @@ function createMiniWindow(url) {
     show: false,
     skipTaskbar: true,
     title: "Pulse Shelf Mini",
+    icon: getAppIconPath() || undefined,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(ROOT_DIR, "preload.js"),
     },
   });
+  applyWindowIcon(miniWindow);
 
   miniWindow.setAlwaysOnTop(true, "screen-saver");
   miniWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -217,6 +223,28 @@ function cleanupServer() {
   } finally {
     serverHandle = null;
   }
+}
+
+function getAppIconPath() {
+  if (fs.existsSync(APP_ICON_PATH)) return APP_ICON_PATH;
+
+  writeLog(`App icon not found: ${APP_ICON_PATH}`);
+  return null;
+}
+
+function applyWindowIcon(window) {
+  if (process.platform === "darwin") return;
+
+  const iconPath = getAppIconPath();
+  if (!iconPath) return;
+
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) {
+    writeLog(`App icon could not be loaded: ${iconPath}`);
+    return;
+  }
+
+  window.setIcon(icon);
 }
 
 ipcMain.on("playback-state", (_event, state) => {

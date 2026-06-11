@@ -7,6 +7,7 @@
   "scripts": {
     "build": "electron-builder --win nsis",
     "desktop": "electron electron-main.js",
+    "make:icon": "node scripts/make-icon.js",
     "start": "node server.js"
   },
   "engines": {
@@ -25,6 +26,7 @@
     },
     "files": [
       "app.js",
+      "assets/icons/**/*",
       "discordPresence.js",
       ".env.example",
       "DISCORD_RICH_PRESENCE.md",
@@ -50,6 +52,7 @@
     ],
     "win": {
       "forceCodeSigning": false,
+      "icon": "assets/icons/pulse-shelf.ico",
       "signAndEditExecutable": false,
       "target": [
         "nsis"
