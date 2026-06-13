@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, nativeImage, shell, Tray } = require("electron");
 const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
@@ -25,8 +25,10 @@ const APP_ICON_PATH = path.join(ROOT_DIR, "assets", "icons", "pulse-shelf.png");
 
 let mainWindow = null;
 let miniWindow = null;
+let tray = null;
 let serverHandle = null;
 let appIsQuitting = false;
+let miniManuallyHidden = false;
 let currentAppUrl = null;
 let playbackState = {
   duration: 0,
@@ -78,6 +80,7 @@ if (!gotLock) {
       const url = await findOrStartServer();
       writeLog(`Using app URL: ${url}`);
       createWindow(url);
+      createTray();
     })
     .catch((error) => {
       writeLog(`Startup failed: ${error.stack || error.message}`);
@@ -92,6 +95,7 @@ if (!gotLock) {
     writeLog("Before quit.");
     appIsQuitting = true;
     destroyDiscordPresence();
+    cleanupTray();
     cleanupMiniWindow();
     cleanupServer();
   });
@@ -150,14 +154,14 @@ function createMiniWindow(url) {
   }
 
   miniWindow = new BrowserWindow({
-    width: 360,
-    height: 262,
-    minWidth: 320,
-    minHeight: 246,
-    maxWidth: 430,
-    maxHeight: 310,
+    width: 330,
+    height: 206,
+    minWidth: 300,
+    minHeight: 190,
+    maxWidth: 390,
+    maxHeight: 240,
     alwaysOnTop: true,
-    closable: false,
+    closable: true,
     frame: false,
     minimizable: false,
     resizable: false,
@@ -180,18 +184,24 @@ function createMiniWindow(url) {
   });
   miniWindow.once("ready-to-show", () => {
     writeLog("Mini window ready to show.");
-    keepMiniVisible();
+    if (miniManuallyHidden) {
+      miniWindow.hide();
+    } else {
+      keepMiniVisible();
+    }
     miniWindow.webContents.send("playback-state-update", playbackState);
+    updateTrayMenu();
   });
   miniWindow.on("close", (event) => {
     writeLog("Mini close requested.");
     if (appIsQuitting) return;
     event.preventDefault();
-    keepMiniVisible();
+    hideMiniWindow();
   });
   miniWindow.on("closed", () => {
     writeLog("Mini window closed.");
     miniWindow = null;
+    updateTrayMenu();
   });
   miniWindow.webContents.on("render-process-gone", (_event, details) => {
     writeLog(`Mini renderer gone: ${details.reason}`);
@@ -223,6 +233,98 @@ function cleanupServer() {
   } finally {
     serverHandle = null;
   }
+}
+
+function createTray() {
+  if (tray) {
+    updateTrayMenu();
+    return;
+  }
+
+  tray = new Tray(getTrayIcon());
+  tray.setToolTip("Pulse Shelf");
+  tray.on("double-click", toggleMiniWindow);
+  updateTrayMenu();
+}
+
+function cleanupTray() {
+  if (!tray) return;
+
+  try {
+    tray.destroy();
+  } catch {
+  } finally {
+    tray = null;
+  }
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "미니 플레이어 보이기",
+        enabled: !miniWindow || miniWindow.isDestroyed() || !miniWindow.isVisible(),
+        click: showMiniWindow,
+      },
+      {
+        label: "미니 플레이어 숨기기",
+        enabled: Boolean(miniWindow && !miniWindow.isDestroyed() && miniWindow.isVisible()),
+        click: hideMiniWindow,
+      },
+      { type: "separator" },
+      {
+        label: "앱 종료",
+        click: quitFromTray,
+      },
+    ]),
+  );
+}
+
+function showMiniWindow() {
+  miniManuallyHidden = false;
+  if ((!miniWindow || miniWindow.isDestroyed()) && currentAppUrl) {
+    createMiniWindow(currentAppUrl);
+    return;
+  }
+
+  keepMiniVisible();
+  updateTrayMenu();
+}
+
+function hideMiniWindow() {
+  miniManuallyHidden = true;
+  if (miniWindow && !miniWindow.isDestroyed()) {
+    miniWindow.hide();
+  }
+  updateTrayMenu();
+}
+
+function toggleMiniWindow() {
+  if (miniWindow && !miniWindow.isDestroyed() && miniWindow.isVisible()) {
+    hideMiniWindow();
+  } else {
+    showMiniWindow();
+  }
+}
+
+function quitFromTray() {
+  appIsQuitting = true;
+  cleanupTray();
+  cleanupMiniWindow();
+  cleanupServer();
+  app.quit();
+}
+
+function getTrayIcon() {
+  const iconPath = getAppIconPath();
+  if (iconPath) {
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) return icon.resize({ width: 16, height: 16 });
+  }
+
+  return getTaskbarIcon("play");
 }
 
 function getAppIconPath() {
@@ -265,7 +367,10 @@ ipcMain.on("playback-state", (_event, state) => {
   };
   updateTaskbar();
   miniWindow?.webContents.send("playback-state-update", playbackState);
-  keepMiniVisible();
+  if (!miniManuallyHidden) {
+    keepMiniVisible();
+  }
+  updateTrayMenu();
 });
 
 ipcMain.on("presence:playback-update", (_event, trackState) => {
@@ -276,6 +381,12 @@ ipcMain.on("presence:playback-update", (_event, trackState) => {
 
 ipcMain.on("desktop-command", (_event, command) => {
   writeLog(`Desktop command: ${command}`);
+  const commandType = typeof command === "string" ? command : command?.type;
+  if (commandType === "hide-mini-player") {
+    hideMiniWindow();
+    return;
+  }
+
   sendCommandToMainWindow(command);
 });
 
@@ -288,7 +399,9 @@ ipcMain.on("open-external", (_event, url) => {
 
 function sendCommandToMainWindow(command) {
   if (!mainWindow || mainWindow.webContents.isDestroyed()) return;
-  keepMiniVisible();
+  if (!miniManuallyHidden) {
+    keepMiniVisible();
+  }
 
   mainWindow.webContents
     .executeJavaScript(
@@ -303,11 +416,14 @@ function sendCommandToMainWindow(command) {
     .catch(() => {
       mainWindow?.webContents.send("desktop-command", command);
     });
-  setTimeout(keepMiniVisible, 120);
+  if (!miniManuallyHidden) {
+    setTimeout(keepMiniVisible, 120);
+  }
 }
 
 function keepMiniVisible() {
   if (!miniWindow || miniWindow.isDestroyed()) return;
+  miniManuallyHidden = false;
   miniWindow.setAlwaysOnTop(true, "screen-saver");
   miniWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   if (!miniWindow.isVisible()) {
@@ -315,6 +431,7 @@ function keepMiniVisible() {
     return;
   }
   miniWindow.moveTop();
+  updateTrayMenu();
 }
 
 function recreateMiniWindow() {
