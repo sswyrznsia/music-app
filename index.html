@@ -50,6 +50,20 @@
             <p class="helper-text" id="toolHelp">
               권한이 있는 콘텐츠나 직접 올린 콘텐츠만 저장해 주세요.
             </p>
+            <label class="section-toggle" for="downloadSectionEnabled">
+              <input id="downloadSectionEnabled" type="checkbox" />
+              <span>구간만 가져오기</span>
+            </label>
+            <div class="section-fields" id="downloadSectionFields" hidden>
+              <label>
+                <span>시작 시간</span>
+                <input id="downloadStartTime" type="text" inputmode="numeric" placeholder="01:20" />
+              </label>
+              <label>
+                <span>끝 시간</span>
+                <input id="downloadEndTime" type="text" inputmode="numeric" placeholder="02:45" />
+              </label>
+            </div>
             <div class="download-progress" id="downloadProgress" hidden>
               <div class="download-progress-row">
                 <span id="downloadProgressText">다운로드 준비 중</span>

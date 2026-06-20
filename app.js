@@ -5,6 +5,10 @@ const downloadProgress = document.querySelector("#downloadProgress");
 const downloadProgressBar = document.querySelector("#downloadProgressBar");
 const downloadProgressText = document.querySelector("#downloadProgressText");
 const downloadProgressValue = document.querySelector("#downloadProgressValue");
+const downloadSectionEnabled = document.querySelector("#downloadSectionEnabled");
+const downloadSectionFields = document.querySelector("#downloadSectionFields");
+const downloadStartTime = document.querySelector("#downloadStartTime");
+const downloadEndTime = document.querySelector("#downloadEndTime");
 const trackList = document.querySelector("#trackList");
 const trackTemplate = document.querySelector("#trackTemplate");
 const clearQueue = document.querySelector("#clearQueue");
@@ -79,6 +83,13 @@ downloadForm.addEventListener("submit", async (event) => {
   const url = youtubeUrl.value.trim();
   if (!url || isBusy) return;
 
+  const sectionOptions = getDownloadSectionOptions();
+  if (!sectionOptions.ok) {
+    setStatus(sectionOptions.error);
+    alert(sectionOptions.error);
+    return;
+  }
+
   setBusy(true);
   showDownloadProgress({
     active: true,
@@ -89,13 +100,18 @@ downloadForm.addEventListener("submit", async (event) => {
   setStatus("저장 중");
 
   try {
-    const track = await postJson("/api/download", { url });
+    const track = await postJson("/api/download", {
+      url,
+      ...sectionOptions.payload,
+    });
     showDownloadProgress({
       active: false,
       percent: 100,
       message: "저장 완료",
     });
     youtubeUrl.value = "";
+    downloadStartTime.value = "";
+    downloadEndTime.value = "";
     await loadTracks();
     playTrack(track.id);
   } catch (error) {
@@ -189,6 +205,9 @@ playlistForm?.addEventListener("submit", (event) => {
 playlistAddTrack?.addEventListener("click", () => {
   addSelectedTrackToPlaylist();
 });
+downloadSectionEnabled?.addEventListener("change", () => {
+  updateDownloadSectionVisibility();
+});
 
 playPause.addEventListener("click", togglePlayback);
 
@@ -264,6 +283,7 @@ async function init() {
   applyPlayerOptions();
   updateModeButtons();
   updateLoopControls();
+  updateDownloadSectionVisibility();
   initMediaSession();
   initDesktopBridge();
   await Promise.all([loadHealth(), loadTracks()]);
@@ -821,6 +841,46 @@ function setBusy(value) {
   downloadButton.disabled = value || toolState.classList.contains("warning");
   downloadButton.textContent = value ? "저장 중" : "저장";
   youtubeUrl.disabled = value;
+  if (downloadSectionEnabled) downloadSectionEnabled.disabled = value;
+  if (downloadStartTime) downloadStartTime.disabled = value;
+  if (downloadEndTime) downloadEndTime.disabled = value;
+}
+
+function updateDownloadSectionVisibility() {
+  if (!downloadSectionFields || !downloadSectionEnabled) return;
+  downloadSectionFields.hidden = !downloadSectionEnabled.checked;
+}
+
+function getDownloadSectionOptions() {
+  if (!downloadSectionEnabled?.checked) {
+    return { ok: true, payload: {} };
+  }
+
+  const startInput = downloadStartTime?.value.trim() || "";
+  const endInput = downloadEndTime?.value.trim() || "";
+  const startTime = startInput ? parseTimeToSeconds(startInput) : 0;
+  const endTime = endInput ? parseTimeToSeconds(endInput) : null;
+
+  if (startTime === null) {
+    return { ok: false, error: "시작 시간 형식이 올바르지 않습니다. 예: 90, 1:30, 00:01:30" };
+  }
+
+  if (endInput && endTime === null) {
+    return { ok: false, error: "끝 시간 형식이 올바르지 않습니다. 예: 02:45" };
+  }
+
+  if (endTime !== null && startTime >= endTime) {
+    return { ok: false, error: "시작 시간은 끝 시간보다 작아야 합니다." };
+  }
+
+  return {
+    ok: true,
+    payload: {
+      sectionOnly: true,
+      startTime,
+      endTime,
+    },
+  };
 }
 
 function startDownloadProgressPolling() {
@@ -1708,6 +1768,10 @@ function parseTimeInput(value) {
   }
 
   return numbers[0] * 3600 + numbers[1] * 60 + numbers[2];
+}
+
+function parseTimeToSeconds(value) {
+  return parseTimeInput(value);
 }
 
 function clampVolume(value) {

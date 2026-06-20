@@ -450,6 +450,53 @@ input[type="search"]:focus,
   line-height: 1.45;
 }
 
+.section-toggle {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  color: var(--navy);
+  font-size: 0.8rem;
+  font-weight: 900;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.section-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--blue);
+}
+
+.section-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(32, 213, 242, 0.18);
+  border-radius: var(--radius);
+  background: rgba(236, 250, 255, 0.64);
+}
+
+.section-fields[hidden] {
+  display: none;
+}
+
+.section-fields label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.section-fields input {
+  width: 100%;
+  height: 36px;
+}
+
 .download-progress {
   display: grid;
   gap: 7px;
@@ -466,6 +513,7 @@ input[type="search"]:focus,
 
 .download-progress-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -477,6 +525,13 @@ input[type="search"]:focus,
 .download-progress-row strong {
   color: var(--blue);
   font-variant-numeric: tabular-nums;
+}
+
+#downloadProgressText,
+#playerStatus {
+  white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .download-progress-track {
@@ -1130,6 +1185,12 @@ audio {
   font-weight: 950;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.meta-strip #playerStatus {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: pre-wrap;
 }
 
 .playlist-panel,

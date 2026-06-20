@@ -1,9 +1,17 @@
 const { createServer } = require("node:http");
 const { spawn, spawnSync } = require("node:child_process");
 const { createReadStream } = require("node:fs");
+const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
+let ffmpegStaticPath = null;
+
+try {
+  ffmpegStaticPath = require("ffmpeg-static");
+} catch {
+  ffmpegStaticPath = null;
+}
 
 const PORT = Number(process.env.PORT || 4173);
 const ROOT_DIR = __dirname;
@@ -17,6 +25,7 @@ const RESOURCE_DIR = process.resourcesPath || ROOT_DIR;
 const RESOURCE_YT_DLP = path.join(RESOURCE_DIR, "tools", "yt-dlp.exe");
 const SEED_DATA_DIR = path.join(RESOURCE_DIR, "seed-data", "data");
 const SEED_LIBRARY_DIR = path.join(RESOURCE_DIR, "seed-data", "library");
+let loggedFfmpegPath = false;
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -94,7 +103,11 @@ async function handleRequest(request, response) {
 
     if (url.pathname === "/api/download" && request.method === "POST") {
       const body = await readJsonBody(request);
-      const track = await downloadTrack(body.url);
+      const track = await downloadTrack(body.url, {
+        sectionOnly: Boolean(body.sectionOnly),
+        startTime: body.startTime,
+        endTime: body.endTime,
+      });
       return sendJson(response, toClientTrack(track), 201);
     }
 
@@ -131,6 +144,12 @@ async function handleRequest(request, response) {
       });
     }
 
+    if (request.url?.startsWith("/api/download")) {
+      updateDownloadProgress({
+        message: error.publicMessage || error.message || "다운로드 실패",
+      });
+    }
+
     const status = error.statusCode || 500;
     sendJson(response, { error: error.publicMessage || error.message || "서버 오류" }, status);
   }
@@ -141,12 +160,12 @@ async function getHealth() {
     ok: true,
     tools: {
       ytDlp: Boolean(findWorkingCommand(ytDlpCandidates)),
-      ffmpeg: Boolean(findWorkingCommand([{ command: "ffmpeg", args: [] }])),
+      ffmpeg: Boolean(getFfmpegPath({ log: false }) || findWorkingCommand([{ command: "ffmpeg", args: [] }])),
     },
   };
 }
 
-async function downloadTrack(sourceUrl) {
+async function downloadTrack(sourceUrl, options = {}) {
   updateDownloadProgress({
     active: true,
     percent: 0,
@@ -181,9 +200,16 @@ async function downloadTrack(sourceUrl) {
     message: "영상 정보 확인 중",
   });
   const metadata = await loadVideoMetadata(ytDlp, sourceUrl);
-  const outputTemplate = path.join(LIBRARY_DIR, `${id}.%(ext)s`);
+  const section = normalizeDownloadSection(options, metadata);
+  const ffmpegPath = section.enabled ? getFfmpegPath() : null;
+  if (section.enabled && !ffmpegPath) {
+    throw publicError("구간만 가져오기에 필요한 ffmpeg를 찾을 수 없습니다. 앱을 다시 설치하거나 최신 빌드로 실행해 주세요.", 503);
+  }
 
-  await runCommand(ytDlp.command, [
+  const sectionLabel = section.enabled ? formatSectionFileLabel(section.startTime, section.endTime) : "";
+  const outputTemplate = path.join(LIBRARY_DIR, `${id}${sectionLabel ? `_${sectionLabel}` : ""}.%(ext)s`);
+
+  const downloadArgs = [
     ...ytDlp.args,
     "--newline",
     "--no-playlist",
@@ -191,8 +217,20 @@ async function downloadTrack(sourceUrl) {
     "bestaudio/best",
     "--output",
     outputTemplate,
-    sourceUrl,
-  ], {
+  ];
+
+  if (section.enabled) {
+    downloadArgs.push(
+      "--download-sections",
+      `*${secondsToHhMmSs(section.startTime)}-${section.endTime === null ? "" : secondsToHhMmSs(section.endTime)}`,
+      "--ffmpeg-location",
+      ffmpegPath,
+    );
+  }
+
+  downloadArgs.push(sourceUrl);
+
+  await runCommand(ytDlp.command, downloadArgs, {
     onOutput: updateProgressFromYtDlp,
   });
 
@@ -209,6 +247,8 @@ async function downloadTrack(sourceUrl) {
     artist: metadata.artist || "업로더 정보 없음",
     sourceUrl,
     videoId,
+    sectionStart: section.enabled ? section.startTime : null,
+    sectionEnd: section.enabled ? section.endTime : null,
     fileName,
     thumbnail: metadata.thumbnail || `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
     createdAt: new Date().toISOString(),
@@ -238,6 +278,7 @@ async function loadVideoMetadata(ytDlp, sourceUrl) {
       title: typeof info.title === "string" ? info.title : "",
       artist: firstString(info.artist, info.uploader, info.channel, info.creator) || "업로더 정보 없음",
       thumbnail: typeof info.thumbnail === "string" ? info.thumbnail : "",
+      duration: Number.isFinite(Number(info.duration)) ? Number(info.duration) : null,
     };
   } catch {
     return {};
@@ -246,6 +287,128 @@ async function loadVideoMetadata(ytDlp, sourceUrl) {
 
 function firstString(...values) {
   return values.find((value) => typeof value === "string" && value.trim())?.trim() || "";
+}
+
+function normalizeDownloadSection(options, metadata = {}) {
+  if (!options.sectionOnly) {
+    return { enabled: false, startTime: 0, endTime: null };
+  }
+
+  const startTime = normalizeSeconds(options.startTime, 0);
+  const endTime =
+    options.endTime === null || options.endTime === undefined || options.endTime === ""
+      ? null
+      : normalizeSeconds(options.endTime, null);
+
+  if (startTime === null) {
+    throw publicError("시작 시간 형식이 올바르지 않습니다.", 400);
+  }
+
+  if (endTime === null && options.endTime !== null && options.endTime !== undefined && options.endTime !== "") {
+    throw publicError("끝 시간 형식이 올바르지 않습니다.", 400);
+  }
+
+  if (endTime !== null && startTime >= endTime) {
+    throw publicError("시작 시간은 끝 시간보다 작아야 합니다.", 400);
+  }
+
+  const duration = Number(metadata.duration);
+  if (Number.isFinite(duration) && duration > 0) {
+    if (startTime >= duration) {
+      throw publicError(`시작 시간이 영상 길이(${secondsToHhMmSs(duration)})를 넘습니다.`, 400);
+    }
+
+    if (endTime !== null && endTime > duration) {
+      throw publicError(`끝 시간이 영상 길이(${secondsToHhMmSs(duration)})를 넘습니다.`, 400);
+    }
+  }
+
+  return { enabled: true, startTime, endTime };
+}
+
+function getFfmpegPath(options = {}) {
+  const shouldLog = options.log !== false;
+  const candidates = [];
+
+  if (typeof ffmpegStaticPath === "string" && ffmpegStaticPath.trim()) {
+    candidates.push(ffmpegStaticPath);
+
+    if (ffmpegStaticPath.includes("app.asar")) {
+      candidates.push(ffmpegStaticPath.replace("app.asar", "app.asar.unpacked"));
+    }
+  }
+
+  const pathFromPackage = candidates.find((candidate) => {
+    try {
+      return fsSync.existsSync(candidate);
+    } catch {
+      return false;
+    }
+  });
+
+  if (shouldLog && !loggedFfmpegPath) {
+    loggedFfmpegPath = true;
+    console.log(`Pulse Shelf ffmpeg-static path: ${ffmpegStaticPath || "not returned"}`);
+    console.log(`Pulse Shelf resolved ffmpeg path: ${pathFromPackage || "not found"}`);
+  }
+
+  return pathFromPackage || null;
+}
+
+function normalizeSeconds(value, fallback) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
+  }
+
+  if (typeof value === "string") {
+    return parseTimeToSeconds(value);
+  }
+
+  return fallback;
+}
+
+function parseTimeToSeconds(value) {
+  const input = String(value).trim();
+  if (!input) return null;
+
+  if (/^\d+(?:\.\d+)?$/.test(input)) {
+    return Math.floor(Math.max(0, Number(input)));
+  }
+
+  const parts = input.split(":").map((part) => part.trim());
+  if (parts.length < 2 || parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) {
+    return null;
+  }
+
+  const numbers = parts.map(Number);
+  if (numbers.some((number) => !Number.isFinite(number))) return null;
+
+  if (numbers.length === 2) {
+    return numbers[0] * 60 + numbers[1];
+  }
+
+  return numbers[0] * 3600 + numbers[1] * 60 + numbers[2];
+}
+
+function secondsToHhMmSs(value) {
+  const total = Math.max(0, Math.floor(Number(value) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatSectionFileLabel(startTime, endTime) {
+  return `${formatCompactTime(startTime)}-${endTime === null ? "end" : formatCompactTime(endTime)}`;
+}
+
+function formatCompactTime(value) {
+  const total = Math.max(0, Math.floor(Number(value) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const hourPart = hours > 0 ? `${String(hours).padStart(2, "0")}h` : "";
+  return `${hourPart}${String(minutes).padStart(2, "0")}m${String(seconds).padStart(2, "0")}s`;
 }
 
 function createIdleDownloadProgress() {
@@ -313,7 +476,10 @@ function updateProgressFromYtDlp(output) {
 
 async function findDownloadedFile(id) {
   const files = await fs.readdir(LIBRARY_DIR);
-  const match = files.find((file) => path.parse(file).name === id);
+  const match = files.find((file) => {
+    const name = path.parse(file).name;
+    return name === id || name.startsWith(`${id}_`);
+  });
   if (!match) {
     throw publicError("다운로드된 오디오 파일을 찾지 못했습니다.", 500);
   }
