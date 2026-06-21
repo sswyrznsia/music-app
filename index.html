@@ -7,132 +7,234 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="shell">
-      <header class="top-search">
-        <label class="search-box" for="searchInput">
-          <span>검색</span>
-          <input id="searchInput" type="search" autocomplete="off" placeholder="곡 제목 검색" />
-        </label>
-        <button id="statsToggle" class="top-action" type="button" aria-pressed="false">통계</button>
-      </header>
-      <aside class="library-panel" aria-label="음악 보관함">
-        <div class="brand-row">
-          <div class="brand-mark" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
-          <div>
+    <div class="app">
+      <!-- 좌측 아이콘 네비게이션 레일 -->
+      <nav class="rail" aria-label="주요 메뉴">
+        <div class="rail-brand" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div class="rail-nav">
+          <a class="rail-btn" href="#stageView" title="지금 재생">
+            <span class="rail-ico">♪</span>
+            <span class="rail-label">재생</span>
+          </a>
+          <a class="rail-btn" href="#libraryView" title="보관함">
+            <span class="rail-ico">▤</span>
+            <span class="rail-label">보관함</span>
+          </a>
+          <a class="rail-btn" href="#favoritesView" title="즐겨찾기">
+            <span class="rail-ico">♥</span>
+            <span class="rail-label">즐겨찾기</span>
+          </a>
+          <a class="rail-btn" href="#playlistView" title="플레이리스트">
+            <span class="rail-ico">≡</span>
+            <span class="rail-label">목록</span>
+          </a>
+          <a class="rail-btn" href="#addView" title="추가">
+            <span class="rail-ico">+</span>
+            <span class="rail-label">추가</span>
+          </a>
+        </div>
+        <button id="statsToggle" class="rail-btn rail-stats" type="button" aria-pressed="false" title="청취 통계">
+          <span class="rail-ico">◷</span>
+          <span class="rail-label">통계</span>
+        </button>
+      </nav>
+
+      <!-- 작업 영역 -->
+      <main class="workspace">
+        <header class="work-head">
+          <div class="head-titles">
             <h1>Pulse Shelf</h1>
             <p>유튜브 링크를 저장해서 듣는 로컬 음악 앱</p>
           </div>
+          <label class="search-box" for="searchInput">
+            <span class="search-ico" aria-hidden="true">⌕</span>
+            <input id="searchInput" type="search" autocomplete="off" placeholder="곡 제목 검색" />
+          </label>
+        </header>
+
+        <div class="work-grid">
+          <!-- 보관함 컬럼 -->
+          <div class="col-library">
+            <section class="card add-card" id="addView" aria-labelledby="youtube-title">
+              <div class="section-heading">
+                <h2 id="youtube-title">YouTube 오디오 저장</h2>
+                <span class="source-pill" id="toolState">확인 중</span>
+              </div>
+              <form class="link-form" id="downloadForm">
+                <label class="input-label" for="youtubeUrl">노래 링크</label>
+                <div class="input-line">
+                  <input
+                    id="youtubeUrl"
+                    name="youtubeUrl"
+                    type="url"
+                    inputmode="url"
+                    autocomplete="off"
+                    placeholder="https://youtu.be/..."
+                    required
+                  />
+                  <button id="downloadButton" type="submit" disabled>저장</button>
+                </div>
+                <p class="helper-text" id="toolHelp">
+                  권한이 있는 콘텐츠나 직접 올린 콘텐츠만 저장해 주세요.
+                </p>
+                <label class="section-toggle" for="downloadSectionEnabled">
+                  <input id="downloadSectionEnabled" type="checkbox" />
+                  <span>구간만 가져오기</span>
+                </label>
+                <div class="section-fields" id="downloadSectionFields" hidden>
+                  <label>
+                    <span>시작 시간</span>
+                    <input id="downloadStartTime" type="text" inputmode="numeric" placeholder="01:20" />
+                  </label>
+                  <label>
+                    <span>끝 시간</span>
+                    <input id="downloadEndTime" type="text" inputmode="numeric" placeholder="02:45" />
+                  </label>
+                </div>
+                <div class="download-progress" id="downloadProgress" hidden>
+                  <div class="download-progress-row">
+                    <span id="downloadProgressText">다운로드 준비 중</span>
+                    <strong id="downloadProgressValue">0%</strong>
+                  </div>
+                  <div class="download-progress-track" aria-hidden="true">
+                    <span id="downloadProgressBar"></span>
+                  </div>
+                </div>
+              </form>
+            </section>
+
+            <section class="card queue-card" id="libraryView" aria-labelledby="queue-title">
+              <div class="section-heading">
+                <h2 id="queue-title">보관함</h2>
+                <button class="ghost-button" id="clearQueue" type="button">전체 삭제</button>
+              </div>
+              <div class="track-list" id="trackList" role="list"></div>
+            </section>
+
+            <section class="card fav-card" id="favoritesView" aria-labelledby="favorites-title">
+              <div class="section-heading">
+                <h2 id="favorites-title">즐겨찾기</h2>
+                <span class="source-pill" id="favoriteCount">0</span>
+              </div>
+              <div class="favorite-list" id="favoriteList"></div>
+            </section>
+          </div>
+
+          <!-- 스테이지 컬럼 -->
+          <div class="col-stage" id="stageView">
+            <div class="stage-head">
+              <h2>지금 재생</h2>
+            </div>
+
+            <div class="player-frame">
+              <div class="empty-state" id="emptyState">
+                <div class="empty-art" aria-hidden="true">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+                <p>유튜브 링크를 저장하면 여기에 바로 재생됩니다.</p>
+              </div>
+
+              <div class="audio-stage" id="audioStage">
+                <div class="vinyl" aria-hidden="true">
+                  <span></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="loop-panel">
+              <button class="time-pill" id="loopStartTime" type="button">시작 처음</button>
+              <button class="time-pill" id="loopEndTime" type="button">끝 없음</button>
+              <button class="ghost-button" id="loopClear" type="button">시작 지우기</button>
+              <span id="loopStatus">구간 반복 꺼짐</span>
+            </div>
+
+            <div class="meta-strip">
+              <div>
+                <span class="meta-label">곡 수</span>
+                <strong id="queueCount">0</strong>
+              </div>
+              <div>
+                <span class="meta-label">형식</span>
+                <strong id="currentKind">-</strong>
+              </div>
+              <div>
+                <span class="meta-label">상태</span>
+                <strong id="playerStatus">대기</strong>
+              </div>
+            </div>
+
+            <section class="card playlist-panel" id="playlistView" aria-labelledby="playlist-title">
+              <div class="section-heading">
+                <h2 id="playlist-title">플레이리스트</h2>
+                <span class="source-pill" id="activePlaylistLabel">전체 곡</span>
+              </div>
+              <form class="playlist-form" id="playlistForm">
+                <input id="playlistName" type="text" autocomplete="off" placeholder="새 플레이리스트 이름" />
+                <button type="submit">만들기</button>
+              </form>
+              <div class="playlist-list" id="playlistList"></div>
+              <div class="playlist-add">
+                <select id="playlistTrackSelect"></select>
+                <button id="playlistAddTrack" type="button">곡 추가</button>
+              </div>
+            </section>
+
+            <section class="card stats-panel" id="statsPanel" hidden>
+              <div class="section-heading">
+                <h2>청취 통계</h2>
+                <button class="ghost-button" id="clearStats" type="button">초기화</button>
+              </div>
+              <p class="stats-total">총 재생 시간 <strong id="statsTotal">0.0분</strong></p>
+              <div class="stats-list" id="statsList"></div>
+            </section>
+          </div>
         </div>
+      </main>
 
-        <section class="control-group" aria-labelledby="youtube-title">
-          <div class="section-heading">
-            <h2 id="youtube-title">YouTube 오디오 저장</h2>
-            <span class="source-pill" id="toolState">확인 중</span>
+      <!-- 하단 고정 재생바 -->
+      <footer class="playbar" aria-label="재생 컨트롤">
+        <div class="pb-now">
+          <div class="pb-art" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
           </div>
-          <form class="link-form" id="downloadForm">
-            <label class="input-label" for="youtubeUrl">노래 링크</label>
-            <div class="input-line">
-              <input
-                id="youtubeUrl"
-                name="youtubeUrl"
-                type="url"
-                inputmode="url"
-                autocomplete="off"
-                placeholder="https://youtu.be/..."
-                required
-              />
-              <button id="downloadButton" type="submit" disabled>저장</button>
-            </div>
-            <p class="helper-text" id="toolHelp">
-              권한이 있는 콘텐츠나 직접 올린 콘텐츠만 저장해 주세요.
-            </p>
-            <label class="section-toggle" for="downloadSectionEnabled">
-              <input id="downloadSectionEnabled" type="checkbox" />
-              <span>구간만 가져오기</span>
-            </label>
-            <div class="section-fields" id="downloadSectionFields" hidden>
-              <label>
-                <span>시작 시간</span>
-                <input id="downloadStartTime" type="text" inputmode="numeric" placeholder="01:20" />
-              </label>
-              <label>
-                <span>끝 시간</span>
-                <input id="downloadEndTime" type="text" inputmode="numeric" placeholder="02:45" />
-              </label>
-            </div>
-            <div class="download-progress" id="downloadProgress" hidden>
-              <div class="download-progress-row">
-                <span id="downloadProgressText">다운로드 준비 중</span>
-                <strong id="downloadProgressValue">0%</strong>
-              </div>
-              <div class="download-progress-track" aria-hidden="true">
-                <span id="downloadProgressBar"></span>
-              </div>
-            </div>
-          </form>
-        </section>
-
-        <section class="queue-section" aria-labelledby="queue-title">
-          <div class="section-heading">
-            <h2 id="queue-title">플레이리스트</h2>
-            <button class="ghost-button" id="clearQueue" type="button">전체 삭제</button>
-          </div>
-          <div class="track-list" id="trackList" role="list"></div>
-        </section>
-
-        <section class="favorites-section" aria-labelledby="favorites-title">
-          <div class="section-heading">
-            <h2 id="favorites-title">즐겨찾기</h2>
-            <span class="source-pill" id="favoriteCount">0</span>
-          </div>
-          <div class="favorite-list" id="favoriteList"></div>
-        </section>
-      </aside>
-
-      <section class="player-panel" aria-label="플레이어">
-        <div class="now-row">
-          <div>
+          <div class="pb-info">
             <p class="eyebrow" id="sourceLabel">Ready</p>
-            <h2 id="currentTitle">노래를 선택해 주세요</h2>
+            <div class="pb-title-row">
+              <strong id="currentTitle">노래를 선택해 주세요</strong>
+              <span class="status-dot" id="statusDot" aria-hidden="true"></span>
+            </div>
             <p class="artist-line" id="artistLabel">업로더 정보 없음</p>
             <a class="youtube-link" id="youtubeLink" href="#" hidden>유튜브에서 열기</a>
           </div>
-          <div class="status-dot" id="statusDot" aria-hidden="true"></div>
         </div>
 
-        <div class="player-frame">
-          <div class="empty-state" id="emptyState">
-            <div class="empty-art" aria-hidden="true">
-              <span></span>
-              <span></span>
-              <span></span>
-              <span></span>
-            </div>
-            <p>유튜브 링크를 저장하면 여기에 바로 재생됩니다.</p>
+        <div class="pb-center">
+          <div class="pb-transport">
+            <button class="transport-button" id="prevTrack" type="button" aria-label="이전 곡">
+              &#9664;
+            </button>
+            <button class="transport-button primary" id="playPause" type="button" aria-label="재생 또는 일시정지">
+              &#9654;
+            </button>
+            <button class="transport-button" id="nextTrack" type="button" aria-label="다음 곡">
+              &#9654;&#9654;
+            </button>
           </div>
-
-          <div class="audio-stage" id="audioStage">
-            <div class="vinyl" aria-hidden="true">
-              <span></span>
-            </div>
+          <div class="pb-audio">
             <audio id="audioPlayer" controls preload="metadata"></audio>
           </div>
         </div>
 
-        <div class="transport-row">
-          <button class="transport-button" id="prevTrack" type="button" aria-label="이전 곡">
-            &#9664;
-          </button>
-          <button class="transport-button primary" id="playPause" type="button" aria-label="재생 또는 일시정지">
-            &#9654;
-          </button>
-          <button class="transport-button" id="nextTrack" type="button" aria-label="다음 곡">
-            &#9654;&#9654;
-          </button>
+        <div class="pb-modes">
           <button class="mode-toggle" id="repeatOne" type="button" aria-pressed="false">
             한 곡 반복
           </button>
@@ -143,55 +245,8 @@
             자동 믹스
           </button>
         </div>
-
-        <div class="loop-panel">
-          <button class="time-pill" id="loopStartTime" type="button">시작 처음</button>
-          <button class="time-pill" id="loopEndTime" type="button">끝 없음</button>
-          <button class="ghost-button" id="loopClear" type="button">시작 지우기</button>
-          <span id="loopStatus">구간 반복 꺼짐</span>
-        </div>
-
-        <div class="meta-strip">
-          <div>
-            <span class="meta-label">곡 수</span>
-            <strong id="queueCount">0</strong>
-          </div>
-          <div>
-            <span class="meta-label">형식</span>
-            <strong id="currentKind">-</strong>
-          </div>
-          <div>
-            <span class="meta-label">상태</span>
-            <strong id="playerStatus">대기</strong>
-          </div>
-        </div>
-
-        <section class="playlist-panel" aria-labelledby="playlist-title">
-          <div class="section-heading">
-            <h2 id="playlist-title">플레이리스트</h2>
-            <span class="source-pill" id="activePlaylistLabel">전체 곡</span>
-          </div>
-          <form class="playlist-form" id="playlistForm">
-            <input id="playlistName" type="text" autocomplete="off" placeholder="새 플레이리스트 이름" />
-            <button type="submit">만들기</button>
-          </form>
-          <div class="playlist-list" id="playlistList"></div>
-          <div class="playlist-add">
-            <select id="playlistTrackSelect"></select>
-            <button id="playlistAddTrack" type="button">곡 추가</button>
-          </div>
-        </section>
-
-        <section class="stats-panel" id="statsPanel" hidden>
-          <div class="section-heading">
-            <h2>청취 통계</h2>
-            <button class="ghost-button" id="clearStats" type="button">초기화</button>
-          </div>
-          <p class="stats-total">총 재생 시간 <strong id="statsTotal">0.0분</strong></p>
-          <div class="stats-list" id="statsList"></div>
-        </section>
-      </section>
-    </main>
+      </footer>
+    </div>
 
     <template id="trackTemplate">
       <article class="track-card" role="listitem">
